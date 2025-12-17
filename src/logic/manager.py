@@ -253,13 +253,21 @@ class Manager:
             item_hash = item['torbox_hash']
             is_anime = bool(item['is_anime']) # Retrieve from DB
 
-            if not item_hash: continue
+            if not item_hash: 
+                print(f"  Skipping {title}: no hash in DB")
+                continue
 
-            t_item = torbox_map.get(item_hash)
-            if not t_item: continue
+            # Normalize hash to lowercase for comparison
+            item_hash_lower = item_hash.lower()
+            t_item = torbox_map.get(item_hash_lower)
+            
+            if not t_item:
+                print(f"  {title}: hash {item_hash_lower[:16]}... not found in Torbox")
+                continue
 
+            print(f"  {title}: state={t_item['download_state']}")
             if t_item['download_state'] == 'completed' or t_item['download_state'] == 'cached':
-                self.create_symlink(row_id, title, year, media_type, season, item_hash, t_item, is_anime)
+                self.create_symlink(row_id, title, year, media_type, season, item_hash_lower, t_item, is_anime)
 
     def create_symlink(self, row_id, title, year, media_type, season, item_hash, torbox_item, is_anime):
         mount_path = Path(config.get().mount_path)

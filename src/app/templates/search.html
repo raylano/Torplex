@@ -5,7 +5,7 @@
 
 <form method="get" action="/search" class="mb-4">
     <div class="input-group">
-        <input type="text" name="q" class="form-control" placeholder="Search movie..." value="{{ query }}">
+        <input type="text" name="q" class="form-control" placeholder="Search movies & series..." value="{{ query }}">
         <button class="btn btn-primary" type="submit">Search</button>
     </div>
 </form>
@@ -20,13 +20,16 @@
             <div class="card-img-top bg-secondary text-white d-flex align-items-center justify-content-center" style="height: 300px;">No Image</div>
             {% endif %}
             <div class="card-body">
+                <span class="badge {{ 'bg-primary' if result.media_type == 'movie' else 'bg-info' }} mb-2">
+                    {{ 'Movie' if result.media_type == 'movie' else 'TV Series' }}
+                </span>
                 <h5 class="card-title">{{ result.title }}</h5>
-                <p class="card-text text-muted">{{ result.release_date[:4] if result.release_date else '' }}</p>
+                <p class="card-text text-muted">{{ result.year }}</p>
                 <form hx-post="/add" hx-swap="outerHTML">
                     <input type="hidden" name="tmdb_id" value="{{ result.id }}">
                     <input type="hidden" name="title" value="{{ result.title }}">
-                    <input type="hidden" name="year" value="{{ result.release_date[:4] if result.release_date else 0 }}">
-                    <input type="hidden" name="media_type" value="movie">
+                    <input type="hidden" name="year" value="{{ result.year or 0 }}">
+                    <input type="hidden" name="media_type" value="{{ result.media_type }}">
                     <button type="submit" class="btn btn-success w-100">Request</button>
                 </form>
             </div>
