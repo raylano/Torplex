@@ -246,7 +246,32 @@ class Manager:
                 scraped = self.scraper.scrape_episode(title, season, episode, year, imdb_id, is_anime)
             
             if not scraped:
-                # Build from hash
+                print(f"  ✗ No results found")
+                db.update_status(row_id, "NOT_FOUND")
+                continue
+            
+            # Take top candidates for cache check
+            # Increased from 10 to 100 to maximize cache hit chance and reduce downloads
+            top_candidates = scraped[:100]
+            hashes = [s.info_hash for s in top_candidates]
+            
+            print(f"  Checking cache for {len(hashes)} hashes...")
+            cache_result = self.debrid.check_cached(hashes)
+            
+            # Find cached torrents
+            cached_candidates = [s for s in top_candidates if cache_result.get(s.info_hash.lower(), False)]
+            
+            if cached_candidates:
+                selected = cached_candidates[0]
+                print(f"  ✓ Cached found: {selected.raw_title[:50]}...")
+            else:
+                selected = top_candidates[0]
+                print(f"  ✗ No cache. Using best: {selected.raw_title[:50]}...")
+
+            # Build magnet link if needed
+            if selected.magnet_link:
+                magnet = selected.magnet_link
+            else:
                 magnet = f"magnet:?xt=urn:btih:{selected.info_hash}"
             
             # Add to debrid
