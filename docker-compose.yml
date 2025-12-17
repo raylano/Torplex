@@ -9,8 +9,8 @@ services:
       - ./data:/data
       # Mount the rclone share so the app can see the files
       - /mnt/torbox:/mnt/torbox:shared
-      # Mount the media folder where symlinks will be created
-      - /mnt/media:/mnt/media
+      # Mount the media folder locally so it's visible in project dir
+      - ./media:/mnt/media
     environment:
       - CONFIG_PATH=/config
       - DATA_PATH=/data
@@ -77,6 +77,8 @@ services:
       - ./plex/config:/config
       - ./plex/transcode:/transcode
       - ./media:/data/media
+      # Required for Plex to follow symlinks to Torbox mount
+      - /mnt/torbox:/mnt/torbox:ro
     restart: unless-stopped
     profiles: ["plex"]
     # devices:
