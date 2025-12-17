@@ -45,38 +45,80 @@ class Manager:
         return 0
 
     def sync_watchlist(self):
-        """Checks Plex Watchlist and adds new items to DB."""
+        """Checks Plex Watchlist and adds new items to DB using plexapi."""
         token = config.get().plex_token
         if not token:
-            print("No Plex Token set.")
+            print("[Watchlist] No Plex Token set.")
             return
 
-        watchlist = self.plex.get_watchlist(token)
-        if not watchlist or 'MediaContainer' not in watchlist:
+        # Get watchlist using new plexapi-based client
+        items = self.plex.get_watchlist(token)
+        
+        if not items:
+            print("[Watchlist] No items found or error fetching watchlist")
             return
-
-        items = watchlist['MediaContainer'].get('Metadata', [])
+        
+        print(f"[Watchlist] Processing {len(items)} items from Plex")
+        added_count = 0
+        
         for item in items:
-            guid = None
-            for g in item.get('Guid', []):
-                if 'tmdb://' in g['id']:
-                    guid = g['id'].replace('tmdb://', '')
-                    break
-
-            if guid:
+            try:
                 title = item.get('title')
                 year = item.get('year')
-                m_type = 'movie' if item.get('type') == 'movie' else 'tv'
-
-                # Check Anime Status early
-                is_anime = self._check_anime_status(guid, m_type)
-
-                if m_type == 'movie':
-                    db.add_media_item(guid, title, 'movie', year, is_anime=is_anime)
-                else:
-                    details = self.tmdb.get_tv_details(guid)
+                media_type = item.get('type')  # 'movie' or 'show'
+                tmdb_id = item.get('tmdb_id')
+                imdb_id = item.get('imdb_id')
+                tvdb_id = item.get('tvdb_id')
+                
+                if media_type == 'movie':
+                    if not tmdb_id:
+                        print(f"  [!] {title}: No TMDB ID, skipping")
+                        continue
+                    
+                    # Check if already exists
+                    existing = db.get_media_item(tmdb_id, 'movie')
+                    if existing:
+                        continue
+                    
+                    # Check anime status
+                    is_anime = self._check_anime_status(tmdb_id, 'movie')
+                    
+                    db.add_media_item(tmdb_id, title, 'movie', year, is_anime=is_anime)
+                    print(f"  [+] Added movie: {title} ({year})")
+                    added_count += 1
+                    
+                else:  # show/series
+                    # For shows, we need TMDB ID - try to convert from TVDB if needed
+                    if not tmdb_id and tvdb_id:
+                        # Try to find TMDB ID from TVDB
+                        search_results = self.tmdb.search_tv(title)
+                        if search_results:
+                            for result in search_results:
+                                if hasattr(result, 'id'):
+                                    tmdb_id = str(result.id)
+                                    break
+                    
+                    if not tmdb_id:
+                        print(f"  [!] {title}: No TMDB ID, skipping")
+                        continue
+                    
+                    # Check if series already tracked
+                    existing = db.get_tracked_series_by_id(tmdb_id)
+                    if existing:
+                        continue
+                    
+                    # Get show details and add
+                    details = self.tmdb.get_tv_details(tmdb_id)
                     status = getattr(details, 'status', 'Returning Series') if details else 'Returning Series'
-                    db.add_tracked_series(guid, title, status)
+                    
+                    db.add_tracked_series(tmdb_id, title, status)
+                    print(f"  [+] Added series: {title}")
+                    added_count += 1
+                    
+            except Exception as e:
+                print(f"  [!] Error processing {item.get('title', 'unknown')}: {e}")
+        
+        print(f"[Watchlist] Added {added_count} new items")
 
     def sync_running_series(self):
         """Scans tracked series for new episodes."""
@@ -286,9 +328,15 @@ class Manager:
 
             print(f"  {title}: state={t_item['download_state']}")
             if t_item['download_state'] == 'completed' or t_item['download_state'] == 'cached':
-                self.create_symlink(row_id, title, year, media_type, season, item_hash_lower, t_item, is_anime)
+                # Pass extra info if available
+                try:
+                    debrid_file_id = item['debrid_file_id']
+                except (KeyError, IndexError):
+                    debrid_file_id = None
+                
+                self.create_symlink(row_id, title, year, media_type, season, item_hash_lower, t_item, is_anime, debrid_file_id)
 
-    def create_symlink(self, row_id, title, year, media_type, season, item_hash, debrid_item, is_anime):
+    def create_symlink(self, row_id, title, year, media_type, season, item_hash, debrid_item, is_anime, debrid_file_id=None):
         mount_path = Path(config.get().mount_path)
         symlink_base = Path(config.get().symlink_path)
 
@@ -377,22 +425,6 @@ class Manager:
             except Exception as e:
                 print(f"  Error scanning {search_path}: {e}")
             
-            return best_file
-
-        def normalize_name(name: str) -> str:
-            """Normalize name for fuzzy matching."""
-            import re
-            # Remove quality indicators, year in various formats, etc
-            name = name.lower()
-            name = re.sub(r'[\[\(]\d{4}[\]\)]', '', name)  # [2012] or (2012)
-            name = re.sub(r'\b(1080p|720p|4k|2160p|bluray|brrip|webrip|web-dl|x264|x265|hevc|yify|yts)\b', '', name, flags=re.I)
-            name = re.sub(r'[^a-z0-9]', '', name)  # Keep only alphanumeric
-            return name.strip()
-
-        # Strategy 1: Try exact debrid name
-        exact_path = mount_path / debrid_name
-        print(f"  Trying exact path: {exact_path}")
-        result = find_best_video(exact_path)
         if result:
             return result
 

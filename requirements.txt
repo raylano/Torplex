@@ -13,3 +13,4 @@ python-multipart
 bencodepy
 rank-torrent-name>=0.7.0
 pydantic>=2.0.0
+plexapi>=4.15.0
