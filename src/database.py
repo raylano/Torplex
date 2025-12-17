@@ -145,6 +145,22 @@ class Database:
         finally:
             conn.close()
 
+    def get_media_item(self, tmdb_id, media_type):
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT * FROM media_items WHERE tmdb_id = ? AND media_type = ?", (str(tmdb_id), media_type))
+        item = c.fetchone()
+        conn.close()
+        return item
+
+    def get_tracked_series_by_id(self, tmdb_id):
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT * FROM tracked_series WHERE tmdb_id = ?", (str(tmdb_id),))
+        item = c.fetchone()
+        conn.close()
+        return item
+
     def get_pending_items(self):
         conn = self.get_connection()
         c = conn.cursor()
