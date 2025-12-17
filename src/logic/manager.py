@@ -216,10 +216,17 @@ class Manager:
                 if resp and resp.get('success'):
                     db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=found_hash)
                 else:
-                    db.update_status(row_id, "NOT_FOUND")
+                    db.update_status(row_id, "NOT_FOUND", error="Failed to add to Torbox")
             else:
-                print(f"Not cached: {query}")
-                db.update_status(row_id, "NOT_FOUND")
+                # Not cached - add first available magnet anyway, it will download
+                print(f"Not cached, adding first result: {query}")
+                first_hash = hashes[0]
+                magnet = magnet_map[first_hash]
+                resp = self.torbox.add_magnet(magnet)
+                if resp and resp.get('success'):
+                    db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=first_hash)
+                else:
+                    db.update_status(row_id, "NOT_FOUND", error="Failed to add to Torbox")
 
     def retry_failed_downloads(self):
         count = db.retry_failed(hours=12)
