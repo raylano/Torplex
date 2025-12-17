@@ -390,6 +390,17 @@ class Manager:
         """
         video_extensions = ['.mkv', '.mp4', '.avi', '.m4v', '.webm']
         
+        def normalize_name(name: str) -> str:
+            import re
+            name = name.lower()
+            # Remove common trash prefixes like 'www.site.com - '
+            name = re.sub(r'^([a-z0-9-]+\.)+[a-z]{2,4}\s*-\s*', '', name)
+            # Remove quality tags for better matching
+            name = re.sub(r'\b(1080p|720p|4k|2160p|hdr|dvdrip|webrip|bluray|x264|x265|hevc|aac|ac3|eac3|h264|h265)\b', '', name)
+            # Remove non-alphanumeric (keep spaces)
+            name = re.sub(r'[^a-z0-9\s]', ' ', name)
+            return " ".join(name.split())
+        
         def find_best_video(search_path: Path) -> Path:
             """Find largest video file in a path."""
             if not search_path.exists():
