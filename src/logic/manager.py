@@ -305,6 +305,7 @@ class Manager:
         debrid_map = { t['hash'].lower(): t for t in debrid_torrents }
 
         recovery_failures = 0
+        recovered_hashes = set()
 
         for item in items:
             row_id = item['id']
@@ -324,6 +325,11 @@ class Manager:
             t_item = debrid_map.get(item_hash_lower)
             
             if not t_item:
+                # Check if we already recovered this hash in this cycle
+                if item_hash_lower in recovered_hashes:
+                    # Already handled, just wait for next cycle
+                    continue
+
                 print(f"  {title}: hash {item_hash_lower[:16]}... not found in {self.debrid.name}")
                 
                 # Anti-spam / rate limit protection
@@ -339,6 +345,8 @@ class Manager:
                         res = self.debrid.add_magnet(magnet)
                         if not res:
                             recovery_failures += 1
+                        else:
+                            recovered_hashes.add(item_hash_lower)
                 except Exception as e:
                     print(f"  Recovery failed: {e}")
                     recovery_failures += 1

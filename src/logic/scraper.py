@@ -49,9 +49,19 @@ class MultiScraper:
             quality_profile=config.get().quality_profile,
             allow_4k=config.get().allow_4k
         )
+        
+        # Check which services are available
+        self.torrentio_available = self._check_torrentio()
+        self.prowlarr_available = self._check_prowlarr()
+        
+        print(f"[Scraper] Torrentio: {'✓' if self.torrentio_available else '✗'}")
+        print(f"[Scraper] Prowlarr: {'✓' if self.prowlarr_available else '✗'}")
 
     def _scrape_torbox(self, query: str) -> List[ScrapedTorrent]:
         """Scrape directly from Torbox Voyager."""
+        # Temporarily disabled due to API 404s
+        return []
+        
         if not self.debrid_client or not hasattr(self.debrid_client, 'search'):
             return []
 
