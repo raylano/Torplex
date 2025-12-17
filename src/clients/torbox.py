@@ -54,16 +54,23 @@ class TorboxClient:
         Adds a magnet link to Torbox.
         """
         url = f"{self.base_url}/torrents/createtorrent"
-        data = {
+        
+        # Torbox API requires multipart/form-data, NOT JSON
+        form_data = {
             "magnet": magnet_link,
-            "seed": 1,
-            "allow_zip": False
+            "seed": "1",
+            "allow_zip": "false"
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {config.get().torbox_api_key}"
+            # Don't set Content-Type - let requests set it for multipart
         }
         
         print(f"Torbox: Adding magnet (first 100 chars): {magnet_link[:100]}...")
         
         try:
-            resp = requests.post(url, json=data, headers=self._headers())
+            resp = requests.post(url, data=form_data, headers=headers)
             resp.raise_for_status()
             result = resp.json()
             print(f"Torbox: Successfully added - {result}")
