@@ -279,6 +279,8 @@ class Manager:
         print(f"{self.debrid.name} has {len(debrid_torrents)} torrents")
         debrid_map = { t['hash'].lower(): t for t in debrid_torrents }
 
+        recovery_failures = 0
+
         for item in items:
             row_id = item['id']
             title = item['title']
@@ -298,15 +300,23 @@ class Manager:
             
             if not t_item:
                 print(f"  {title}: hash {item_hash_lower[:16]}... not found in {self.debrid.name}")
+                
+                # Anti-spam / rate limit protection
+                if recovery_failures >= 3:
+                    print("  [!] Too many recovery failures. Skipping remaining recoveries to avoid rate limits.")
+                    continue
+
                 # Try to recover by re-adding if not in list but marked as downloading
-                # This handles cases where add failed (e.g. limit reached) or item was removed
                 try:
                     magnet = item['magnet_link']
                     if magnet:
                         print(f"  Attempting to re-add missing download to {self.debrid.name}...")
-                        self.debrid.add_magnet(magnet)
+                        res = self.debrid.add_magnet(magnet)
+                        if not res:
+                            recovery_failures += 1
                 except Exception as e:
                     print(f"  Recovery failed: {e}")
+                    recovery_failures += 1
                 continue
 
             print(f"  {title}: state={t_item['download_state']}")
@@ -405,9 +415,16 @@ class Manager:
                                     best_file = fp
                             except:
                                 pass
+                return best_file
             except Exception as e:
                 print(f"  Error scanning {search_path}: {e}")
+                return None
             
+        # Strategy 1: Try exact debrid name match
+        result = None
+        if debrid_name:
+            result = find_best_video(mount_path / debrid_name)
+
         if result:
             return result
 
