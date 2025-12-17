@@ -31,29 +31,26 @@ class Database:
         ''')
 
         # Media Items (Movies OR Episodes)
-        # parent_tmdb_id is populated for Episodes (pointing to the Show)
-        # season_number/episode_number populated for Episodes
+        # Added is_anime column
         c.execute('''
             CREATE TABLE IF NOT EXISTS media_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tmdb_id TEXT, -- For movies, it's the movie ID. For episodes, it's the Episode ID (if avail) or null
-                parent_tmdb_id TEXT, -- For episodes, the Show ID
+                tmdb_id TEXT,
+                parent_tmdb_id TEXT,
                 title TEXT,
                 media_type TEXT, -- 'movie' or 'episode'
                 year INTEGER,
                 season_number INTEGER,
                 episode_number INTEGER,
                 air_date TEXT,
-                status TEXT DEFAULT 'PENDING', -- PENDING, SEARCHING, DOWNLOADING, COMPLETED, NOT_FOUND
+                status TEXT DEFAULT 'PENDING',
                 magnet_link TEXT,
                 torbox_hash TEXT,
                 symlink_path TEXT,
+                is_anime INTEGER DEFAULT 0, -- 0 = False, 1 = True
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 error_message TEXT,
-                -- Unique constraint to prevent duplicate downloads
-                -- For Movie: parent_tmdb_id is NULL, so uniqueness is on tmdb_id + media_type
-                -- For Episode: Uniqueness on parent_tmdb_id + season + episode
                 UNIQUE(parent_tmdb_id, season_number, episode_number),
                 UNIQUE(tmdb_id, media_type)
             )
@@ -74,29 +71,28 @@ class Database:
         finally:
             conn.close()
 
-    def add_media_item(self, tmdb_id, title, media_type, year=None, parent_tmdb_id=None, season=None, episode=None, air_date=None):
+    def add_media_item(self, tmdb_id, title, media_type, year=None, parent_tmdb_id=None, season=None, episode=None, air_date=None, is_anime=0):
         conn = self.get_connection()
         c = conn.cursor()
         try:
             if media_type == 'movie':
                 c.execute('''
-                    INSERT OR IGNORE INTO media_items (tmdb_id, title, media_type, year, status)
-                    VALUES (?, ?, ?, ?, 'PENDING')
-                ''', (str(tmdb_id), title, media_type, year))
+                    INSERT OR IGNORE INTO media_items (tmdb_id, title, media_type, year, status, is_anime)
+                    VALUES (?, ?, ?, ?, 'PENDING', ?)
+                ''', (str(tmdb_id), title, media_type, year, is_anime))
             else:
                 c.execute('''
                     INSERT OR IGNORE INTO media_items (
                         tmdb_id, parent_tmdb_id, title, media_type, year,
-                        season_number, episode_number, air_date, status
+                        season_number, episode_number, air_date, status, is_anime
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
-                ''', (str(tmdb_id), str(parent_tmdb_id), title, media_type, year, season, episode, air_date))
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+                ''', (str(tmdb_id), str(parent_tmdb_id), title, media_type, year, season, episode, air_date, is_anime))
 
             conn.commit()
             return c.lastrowid
         except Exception as e:
             # print(f"Error adding item: {e}")
-            # Ignore unique constraint errors usually
             pass
         finally:
             conn.close()
@@ -133,7 +129,7 @@ class Database:
         conn.close()
         return items
 
-    def update_status(self, db_id, status, magnet=None, hash=None, error=None, symlink_path=None):
+    def update_status(self, db_id, status, magnet=None, hash=None, error=None, symlink_path=None, is_anime=None):
         conn = self.get_connection()
         c = conn.cursor()
         updates = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
@@ -151,6 +147,9 @@ class Database:
         if symlink_path:
             updates.append("symlink_path = ?")
             params.append(symlink_path)
+        if is_anime is not None:
+            updates.append("is_anime = ?")
+            params.append(is_anime)
 
         params.append(db_id)
 
@@ -163,7 +162,6 @@ class Database:
         """Resets items from NOT_FOUND to PENDING if older than X hours."""
         conn = self.get_connection()
         c = conn.cursor()
-        # SQLite doesn't have interval math like PG, use python or modifiers
         c.execute(f'''
             UPDATE media_items
             SET status = 'PENDING', updated_at = CURRENT_TIMESTAMP
