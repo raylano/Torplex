@@ -78,7 +78,7 @@ services:
       - ./plex/transcode:/transcode
       - ./media:/data/media
       # Required for Plex to follow symlinks to Torbox mount
-      - /mnt/torbox:/mnt/torbox:ro
+      - /mnt/torbox:/mnt/torbox:ro,rslave
     restart: unless-stopped
     profiles: ["plex"]
     # devices:

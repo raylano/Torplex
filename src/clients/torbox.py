@@ -103,8 +103,8 @@ class TorboxClient(DebridClient):
 
     def search(self, query: str) -> List[Dict[str, Any]]:
         """Search for torrents on Torbox (Voyager)."""
-        # Note: Endpoint surmised from wrapper usage, may need adjustment if distinct from 'checkcached'
-        url = f"{self.base_url}/torrents/search"
+        # Trying root search endpoint as torrents/search returned 404
+        url = f"{self.base_url}/search"
         params = {"query": query}
         try:
             resp = requests.get(url, params=params, headers=self._headers())
