@@ -22,6 +22,7 @@ services:
       - "8000:8000"
     depends_on:
       - rclone
+    profiles: ["core", "plex"]
 
   # Rclone: Mounts Torbox WebDAV
   rclone:
@@ -37,9 +38,8 @@ services:
     volumes:
       - ./config/rclone:/config/rclone
       - /mnt/torbox:/mnt/torbox:rshared
-    # The command mounts the remote 'torbox' to /mnt/torbox.
-    # Users must configure rclone.conf in ./config/rclone/rclone.conf first
     command: "mount torbox: /mnt/torbox --allow-other --dir-cache-time 10s --vfs-cache-mode full"
+    profiles: ["core", "plex"]
 
   # Prowlarr: Indexer Manager
   prowlarr:
@@ -54,6 +54,7 @@ services:
     ports:
       - "9696:9696"
     restart: unless-stopped
+    profiles: ["core", "plex"]
 
   # Flaresolverr: Often needed for Prowlarr to bypass Cloudflare
   flaresolverr:
@@ -64,3 +65,25 @@ services:
     ports:
       - "8191:8191"
     restart: unless-stopped
+    profiles: ["core", "plex"]
+
+  # Plex Media Server (Optional)
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - VERSION=docker
+      - PLEX_CLAIM=${PLEX_CLAIM}
+    volumes:
+      - ./plex/config:/config
+      - ./plex/transcode:/transcode
+      - ./media:/data/media
+    restart: unless-stopped
+    profiles: ["plex"]
+    # devices:
+    #   - /dev/dri:/dev/dri # Intel QuickSync
+    #   - /dev/nvidia0:/dev/nvidia0 # Nvidia (requires nvidia-container-toolkit)

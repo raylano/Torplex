@@ -10,69 +10,60 @@ This project is a self-hosted automation stack designed to manage your media lib
     *   Checks Torbox cache for instant availability.
     *   Adds magnets to Torbox.
     *   Mounts Torbox WebDAV via **Rclone**.
-*   **Smart Symlinking**: Automatically creates organized symlinks (e.g., `/mnt/media/movies/Avatar (2009)/Avatar.mkv`) pointing to the Rclone mount, ready for Plex to scan.
+*   **Smart Symlinking**: Automatically creates organized symlinks in `/mnt/media` (Movies, TV, Anime) pointing to the Rclone mount.
 *   **Web Interface**: A clean dashboard to view status, search TMDB, and manually request items.
-*   **Anime Support**: Preferentially selects "Dual-Audio" or "Dubbed" releases for detected Anime content.
+*   **Anime Support**: Preferentially selects "Dual-Audio" or "Dubbed" releases and organizes them into separate folders.
+*   **Plex Media Server**: Optional built-in Plex server integration.
 
-## Prerequisites
+## Quick Start
 
-*   **Docker & Docker Compose** installed on your Linux VPS.
-*   **Torbox Account** (with API Key).
-*   **TMDB Account** (with API Key).
-*   **Prowlarr** instance (managed within this stack or external).
+The easiest way to get started is using the included setup script.
 
-## Installation
-
-1.  **Clone the Repository** (or copy files to your VPS).
-2.  **Configure Rclone**:
-    *   Create a folder `config/rclone`.
-    *   Create `config/rclone/rclone.conf`.
-    *   Add your Torbox WebDAV configuration:
-        ```ini
-        [torbox]
-        type = webdav
-        url = https://webdav.torbox.app/
-        vendor = other
-        user = <YOUR_EMAIL>
-        pass = <YOUR_WEBDAV_PASSWORD_ENCRYPTED_BY_RCLONE>
-        ```
-    *   *Tip*: Run `rclone config` locally to generate this block if needed.
-
-3.  **Configure Environment**:
-    *   Create `config/config.yaml` (optional, or rely on UI/Defaults).
-    *   The app will generate a default config on first run in `config/config.yaml`.
-    *   You need to edit `config/config.yaml` to set your API keys:
-        ```yaml
-        torbox_api_key: "your_key"
-        tmdb_api_key: "your_key"
-        plex_token: "your_token"
-        prowlarr_url: "http://prowlarr:9696"
-        prowlarr_api_key: "your_prowlarr_key"
-        quality_profile: "1080p" # or 4k
-        ```
-
-4.  **Start the Stack**:
+1.  **Clone the Repository**:
     ```bash
-    docker-compose up -d
+    git clone <repo_url>
+    cd <repo_folder>
     ```
 
-5.  **Setup Prowlarr**:
-    *   Access Prowlarr at `http://<your-ip>:9696`.
-    *   Add your indexers (e.g., Torrentio, 1337x, etc.).
-    *   Get your API Key from Settings -> General.
-    *   Update `config/config.yaml` with the API key and restart the app container.
+2.  **Run Setup**:
+    ```bash
+    ./setup.sh
+    ```
+    This script will:
+    *   Create necessary directories.
+    *   Ask for your API keys (Torbox, TMDB, Plex, Prowlarr).
+    *   Configure Rclone for Torbox WebDAV (automatically obfuscating your password).
+    *   Ask if you want to install/run the Plex Media Server container.
+    *   Start the stack.
+
+3.  **Access the UI**:
+    *   **Manager Dashboard**: `http://<your-ip>:8000`
+    *   **Prowlarr**: `http://<your-ip>:9696` (Configure indexers here first!)
+    *   **Plex**: `http://<your-ip>:32400/web` (If enabled)
+
+## Manual Configuration (Advanced)
+
+If you prefer not to use the script, you can manually configure the stack.
+
+1.  **Directories**: Create `config/rclone`, `data`, `media` folders.
+2.  **Rclone**: Create `config/rclone/rclone.conf` with your Torbox WebDAV details.
+3.  **App Config**: The app generates `config/config.yaml` on first run. Edit it to add your API keys.
+4.  **Docker**: Run `docker-compose up -d`. Use `--profile plex` to include Plex.
 
 ## Workflow
 
-1.  **Request**: Add a movie/show to your **Plex Watchlist** OR search and request via the **Web UI** (`http://<your-ip>:8000`).
-2.  **Search**: The system detects the new item, determines if it is Anime (to prefer Dual-Audio/Dub), and searches Prowlarr.
-3.  **Cache Check**: It checks if the best results are already cached on Torbox.
-4.  **Download/Cache**: It adds the magnet to Torbox.
-5.  **Symlink**: Once the file is ready (cached or downloaded), it creates a symlink in `/mnt/media`.
-6.  **Watch**: Plex scans the `/mnt/media` folder and the content appears in your library.
+1.  **Request**: Add a movie/show to your **Plex Watchlist** OR search and request via the **Web UI**.
+2.  **Search**: The system detects the new item, checks if it's Anime, and searches Prowlarr.
+3.  **Cache/Download**: It adds the best magnet to Torbox (preferring cached).
+4.  **Symlink**: Once ready, it symlinks the file to:
+    *   `/media/movies`
+    *   `/media/tvshows`
+    *   `/media/animemovies`
+    *   `/media/animeshows`
+5.  **Watch**: Plex scans the `/data/media` folder.
 
 ## Troubleshooting
 
 *   **Logs**: `docker-compose logs -f app`
-*   **Startup Crash**: Ensure `config/rclone/rclone.conf` exists and is valid.
-*   **No Results**: Check Prowlarr indexers and Prowlarr connectivity.
+*   **Startup Crash**: Ensure `config/rclone/rclone.conf` exists.
+*   **Prowlarr**: Ensure you have added indexers (like Torrentio) in Prowlarr and synced the API key.
