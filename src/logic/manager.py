@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from src.config import config
 from src.database import db
-from src.clients.torbox import TorboxClient
+from src.clients.debrid import get_client as get_debrid_client
 from src.clients.tmdb import TMDBClient
 from src.clients.plex import PlexClient
 from src.clients.prowlarr import ProwlarrClient
@@ -11,7 +11,7 @@ from src.logic.quality import QualityManager
 
 class Manager:
     def __init__(self):
-        self.torbox = TorboxClient()
+        self.debrid = get_debrid_client()
         self.tmdb = TMDBClient()
         self.plex = PlexClient()
         self.prowlarr = ProwlarrClient()
@@ -197,18 +197,10 @@ class Manager:
 
             # Check cache for ALL collected hashes
             print(f"Checking cache for {len(hashes)} hashes...")
-            cache_result = self.torbox.check_cached(hashes)
-            cached_hashes = []
-
-            if isinstance(cache_result, dict) and 'data' in cache_result:
-                cache_list = cache_result['data']
-            else:
-                cache_list = cache_result
-
-            if isinstance(cache_list, list):
-                cached_hashes = [h for h in hashes if h in cache_list]
-            elif isinstance(cache_list, dict):
-                cached_hashes = [h for h in hashes if h in cache_list and cache_list[h]]
+            cache_result = self.debrid.check_cached(hashes)
+            
+            # New interface returns {hash: bool} directly
+            cached_hashes = [h for h in hashes if cache_result.get(h.lower(), False)]
 
             # PRIORITY: Use cached hash if available, otherwise first (highest seeded)
             if cached_hashes:
@@ -219,12 +211,12 @@ class Manager:
                 print(f"✗ No cached torrents, using highest seeded: {use_hash[:16]}...")
             
             magnet = magnet_map[use_hash]
-            resp = self.torbox.add_magnet(magnet)
+            resp = self.debrid.add_magnet(magnet)
             if resp and resp.get('success'):
                 db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=use_hash)
-                print(f"Successfully added to Torbox: {query}")
+                print(f"Successfully added to {self.debrid.name}: {query}")
             else:
-                db.update_status(row_id, "NOT_FOUND", error="Failed to add to Torbox")
+                db.update_status(row_id, "NOT_FOUND", error=f"Failed to add to {self.debrid.name}")
 
     def retry_failed_downloads(self):
         count = db.retry_failed(hours=12)
@@ -235,14 +227,13 @@ class Manager:
         items = db.get_downloading_items()
         print(f"Process downloads: {len(items)} items with DOWNLOADING status")
 
-        torbox_list_resp = self.torbox.get_torrents()
-        if not torbox_list_resp or 'data' not in torbox_list_resp:
-            print("No torrents in Torbox list")
+        debrid_torrents = self.debrid.get_torrents()
+        if not debrid_torrents:
+            print(f"No torrents in {self.debrid.name} list")
             return
 
-        torbox_items = torbox_list_resp['data']
-        print(f"Torbox has {len(torbox_items)} torrents")
-        torbox_map = { t['hash']: t for t in torbox_items }
+        print(f"{self.debrid.name} has {len(debrid_torrents)} torrents")
+        debrid_map = { t['hash'].lower(): t for t in debrid_torrents }
 
         for item in items:
             row_id = item['id']
@@ -259,21 +250,21 @@ class Manager:
 
             # Normalize hash to lowercase for comparison
             item_hash_lower = item_hash.lower()
-            t_item = torbox_map.get(item_hash_lower)
+            t_item = debrid_map.get(item_hash_lower)
             
             if not t_item:
-                print(f"  {title}: hash {item_hash_lower[:16]}... not found in Torbox")
+                print(f"  {title}: hash {item_hash_lower[:16]}... not found in {self.debrid.name}")
                 continue
 
             print(f"  {title}: state={t_item['download_state']}")
             if t_item['download_state'] == 'completed' or t_item['download_state'] == 'cached':
                 self.create_symlink(row_id, title, year, media_type, season, item_hash_lower, t_item, is_anime)
 
-    def create_symlink(self, row_id, title, year, media_type, season, item_hash, torbox_item, is_anime):
+    def create_symlink(self, row_id, title, year, media_type, season, item_hash, debrid_item, is_anime):
         mount_path = Path(config.get().mount_path)
         symlink_base = Path(config.get().symlink_path)
 
-        torrent_name = torbox_item['name']
+        torrent_name = debrid_item.get('name', '')
         source_dir = mount_path / torrent_name
 
         search_path = mount_path / torrent_name

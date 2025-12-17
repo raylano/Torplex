@@ -234,27 +234,64 @@ class Database:
         
         if filter_type == 'movies':
             c.execute("SELECT * FROM media_items WHERE media_type = 'movie' ORDER BY created_at DESC")
+            items = c.fetchall()
         elif filter_type == 'series':
-            # Get unique series from episodes
+            # Get unique series with calculated status (only COMPLETED if ALL episodes done)
             c.execute("""
-                SELECT DISTINCT parent_tmdb_id as tmdb_id, title, 'episode' as media_type, 
-                       year, NULL as season_number, NULL as episode_number,
-                       MAX(id) as id, status, created_at
+                SELECT parent_tmdb_id as tmdb_id, 
+                       MIN(title) as title, 
+                       'series' as media_type, 
+                       MIN(year) as year,
+                       NULL as season_number, 
+                       NULL as episode_number,
+                       MAX(id) as id,
+                       CASE 
+                           WHEN COUNT(*) = SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) THEN 'COMPLETED'
+                           WHEN SUM(CASE WHEN status = 'NOT_FOUND' THEN 1 ELSE 0 END) > 0 THEN 'NOT_FOUND'
+                           WHEN SUM(CASE WHEN status = 'DOWNLOADING' THEN 1 ELSE 0 END) > 0 THEN 'DOWNLOADING'
+                           ELSE 'PENDING'
+                       END as status,
+                       MAX(created_at) as created_at,
+                       COUNT(*) as total_episodes,
+                       SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) as completed_episodes
                 FROM media_items 
                 WHERE media_type = 'episode' 
                 GROUP BY parent_tmdb_id
                 ORDER BY created_at DESC
             """)
+            items = c.fetchall()
         elif filter_type == 'completed':
-            c.execute("SELECT * FROM media_items WHERE status = 'COMPLETED' ORDER BY updated_at DESC")
+            # Movies that are completed + Series where ALL episodes are completed
+            c.execute("""
+                SELECT * FROM media_items WHERE media_type = 'movie' AND status = 'COMPLETED'
+                UNION ALL
+                SELECT parent_tmdb_id as tmdb_id, 
+                       MIN(title) as title, 
+                       'series' as media_type, 
+                       MIN(year) as year,
+                       NULL as season_number, 
+                       NULL as episode_number,
+                       MAX(id) as id,
+                       'COMPLETED' as status,
+                       MAX(created_at) as created_at,
+                       NULL, NULL, NULL, NULL, NULL
+                FROM media_items 
+                WHERE media_type = 'episode' 
+                GROUP BY parent_tmdb_id
+                HAVING COUNT(*) = SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END)
+                ORDER BY created_at DESC
+            """)
+            items = c.fetchall()
         elif filter_type == 'pending':
             c.execute("SELECT * FROM media_items WHERE status IN ('PENDING', 'DOWNLOADING') ORDER BY created_at DESC")
+            items = c.fetchall()
         elif filter_type == 'failed':
             c.execute("SELECT * FROM media_items WHERE status = 'NOT_FOUND' ORDER BY updated_at DESC")
+            items = c.fetchall()
         else:
             c.execute("SELECT * FROM media_items ORDER BY created_at DESC")
+            items = c.fetchall()
         
-        items = c.fetchall()
         conn.close()
         return items
 

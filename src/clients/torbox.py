@@ -1,14 +1,17 @@
 import requests
+from typing import List, Dict, Optional, Any
 from src.config import config
+from src.clients.debrid_base import DebridClient
 
-class TorboxClient:
+class TorboxClient(DebridClient):
+    """Torbox debrid service client."""
+    
     def __init__(self):
         self.base_url = "https://api.torbox.app/v1/api"
-        # API requires 'api_version' in path.
-        # Based on docs: /{api_version}/api/torrents/...
-        # But wait, docs say `/{api_version}/api/torrents/createtorrent`
-        # and example base url is `https://api.torbox.app`.
-        # So it should be `https://api.torbox.app/v1/api/torrents/...`
+
+    @property
+    def name(self) -> str:
+        return "Torbox"
 
     def _headers(self):
         return {
@@ -16,79 +19,64 @@ class TorboxClient:
             "Content-Type": "application/json"
         }
 
-    def check_cached(self, hash_list):
-        """
-        Checks if hashes are cached in Torbox.
-        Takes a list of hashes (strings).
-        Returns list of cached hashes (or object depending on format).
-        """
+    def check_cached(self, hash_list: List[str]) -> Dict[str, bool]:
+        """Check if hashes are cached in Torbox."""
         url = f"{self.base_url}/torrents/checkcached"
-        # API Docs: ?hash=XXXX,XXXX&format=list
-
         hashes_str = ",".join(hash_list)
-        params = {
-            "hash": hashes_str,
-            "format": "list"
-        }
+        params = {"hash": hashes_str, "format": "list"}
 
         try:
             resp = requests.get(url, params=params, headers=self._headers())
             resp.raise_for_status()
             data = resp.json()
-            # If format=list, it returns a dict where keys are hashes?
-            # Or list of cached hashes?
-            # Docs say: "Options are either object or list. List is the most performant option"
-            # If it's a list, it probably just returns the ones that ARE cached?
-            # Or a list of booleans?
-            # Usually debrid services return { "hash": boolean } or { "hash": { ... } }
-            # Let's assume it returns a dictionary if we used object, but list might be just [hash1, hash2]
-            # Safest is to return the raw data and let logic handle it, but I need to normalize.
-            # I'll use object format to be safe and clear.
-            return data
+            
+            # Torbox returns list of cached hashes
+            # Convert to dict format: {hash: True/False}
+            if isinstance(data.get('data'), list):
+                cached_hashes = set(h.lower() for h in data['data'])
+                return {h.lower(): h.lower() in cached_hashes for h in hash_list}
+            return {h.lower(): False for h in hash_list}
         except Exception as e:
             print(f"Torbox Check Cache Error: {e}")
-            return {}
+            return {h.lower(): False for h in hash_list}
 
-    def add_magnet(self, magnet_link):
-        """
-        Adds a magnet link to Torbox.
-        """
+    def add_magnet(self, magnet_link: str) -> Optional[Dict[str, Any]]:
+        """Add a magnet link to Torbox."""
         url = f"{self.base_url}/torrents/createtorrent"
         
-        # Torbox API requires multipart/form-data, NOT JSON
         form_data = {
             "magnet": magnet_link,
             "seed": "1",
             "allow_zip": "false"
         }
         
-        headers = {
-            "Authorization": f"Bearer {config.get().torbox_api_key}"
-            # Don't set Content-Type - let requests set it for multipart
-        }
+        headers = {"Authorization": f"Bearer {config.get().torbox_api_key}"}
         
-        print(f"Torbox: Adding magnet (first 100 chars): {magnet_link[:100]}...")
+        print(f"[Torbox] Adding magnet: {magnet_link[:80]}...")
         
         try:
             resp = requests.post(url, data=form_data, headers=headers)
             resp.raise_for_status()
             result = resp.json()
-            print(f"Torbox: Successfully added - {result}")
+            print(f"[Torbox] Added successfully")
             return result
         except requests.exceptions.HTTPError as e:
-            print(f"Torbox Add Error: {e}")
-            print(f"Torbox Response: {e.response.text}")
+            print(f"[Torbox] Add Error: {e}")
+            print(f"[Torbox] Response: {e.response.text}")
             return None
         except Exception as e:
-            print(f"Torbox Add Error: {e}")
+            print(f"[Torbox] Add Error: {e}")
             return None
 
-    def get_torrents(self):
+    def get_torrents(self) -> List[Dict[str, Any]]:
+        """Get list of torrents from Torbox."""
         url = f"{self.base_url}/torrents/mylist"
         try:
             resp = requests.get(url, headers=self._headers())
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            return data.get('data', []) if isinstance(data, dict) else data
         except Exception as e:
-            print(f"Torbox List Error: {e}")
+            print(f"[Torbox] List Error: {e}")
             return []
+
