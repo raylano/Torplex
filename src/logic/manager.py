@@ -46,6 +46,26 @@ class Manager:
                 m_type = 'movie' if item.get('type') == 'movie' else 'tv'
                 db.add_item(guid, title, m_type, year)
 
+    def _is_anime(self, tmdb_id, media_type):
+        """Checks if the item is Anime based on TMDB metadata."""
+        if media_type == 'movie':
+            details = self.tmdb.get_movie_details(tmdb_id)
+        else:
+            details = self.tmdb.get_tv_details(tmdb_id)
+
+        if not details: return False
+
+        # Check Genres (16 is Animation) AND Original Language (ja)
+        # Or Keyword 'anime'
+
+        genres = [g['id'] for g in getattr(details, 'genres', [])]
+        orig_lang = getattr(details, 'original_language', '')
+
+        if 16 in genres and orig_lang == 'ja':
+            return True
+
+        return False
+
     def process_pending(self):
         """Searches for pending items."""
         items = db.get_pending_items()
@@ -57,6 +77,11 @@ class Manager:
 
             db.update_status(row_id, "SEARCHING")
 
+            # Check if Anime
+            is_anime = self._is_anime(tmdb_id, media_type)
+            if is_anime:
+                print(f"Detected Anime: {title}")
+
             query = f"{title} {year}"
             search_results = self.prowlarr.search(query)
 
@@ -67,7 +92,7 @@ class Manager:
                 db.update_status(row_id, "PENDING")
                 continue
 
-            filtered = self.quality.filter_items(search_results)
+            filtered = self.quality.filter_items(search_results, is_anime=is_anime)
             if not filtered:
                 print(f"No suitable results for {title}")
                 db.update_status(row_id, "PENDING")

@@ -5,7 +5,7 @@ class QualityManager:
     def __init__(self):
         self.profile = config.get().quality_profile.lower()
 
-    def filter_items(self, items):
+    def filter_items(self, items, is_anime=False):
         """
         Filters a list of Prowlarr/Indexer items based on quality profile.
         Items are expected to be dicts with 'title', 'size', 'indexer', etc.
@@ -36,6 +36,16 @@ class QualityManager:
             if 'hdr' in title or 'dolby vision' in title or 'dv' in title:
                 score += 5
 
+            # Anime specific scoring
+            if is_anime:
+                # Prefer Dual Audio or Dubbed
+                if 'dual' in title or 'dual-audio' in title:
+                    score += 200 # High priority
+                elif 'dub' in title or 'dubbed' in title:
+                    score += 150
+                # Penalize raw if we want dubbed? Usually users want subs if not dubbed.
+                # But request is specifically "dual-audio preffered or dubbed".
+
             ranked_items.append((score, item))
 
         # Sort by score desc
@@ -44,6 +54,7 @@ class QualityManager:
 
     def extract_hash(self, magnet_link):
         # xt=urn:btih:HASH
+        if not magnet_link: return None
         match = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', magnet_link)
         if match:
             return match.group(1).lower()
