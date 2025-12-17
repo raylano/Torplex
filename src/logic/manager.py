@@ -177,6 +177,11 @@ class Manager:
             top_candidates = filtered[:5]
             hashes = []
             magnet_map = {}
+            
+            # Debug: show first candidate's magnet-related fields
+            if top_candidates:
+                first = top_candidates[0]
+                print(f"DEBUG First result: magnetUrl={first.get('magnetUrl')}, downloadUrl={first.get('downloadUrl')}, guid={first.get('guid')[:50] if first.get('guid') else None}, infoHash={first.get('infoHash')}")
 
             for res in top_candidates:
                 magnet = res.get('magnetUrl') or res.get('downloadUrl')

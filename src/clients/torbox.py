@@ -57,12 +57,21 @@ class TorboxClient:
         data = {
             "magnet": magnet_link,
             "seed": 1,
-            "allow_zip": 0
+            "allow_zip": False
         }
+        
+        print(f"Torbox: Adding magnet (first 100 chars): {magnet_link[:100]}...")
+        
         try:
             resp = requests.post(url, json=data, headers=self._headers())
             resp.raise_for_status()
-            return resp.json()
+            result = resp.json()
+            print(f"Torbox: Successfully added - {result}")
+            return result
+        except requests.exceptions.HTTPError as e:
+            print(f"Torbox Add Error: {e}")
+            print(f"Torbox Response: {e.response.text}")
+            return None
         except Exception as e:
             print(f"Torbox Add Error: {e}")
             return None
