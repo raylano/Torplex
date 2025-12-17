@@ -70,17 +70,31 @@ class ProwlarrClient:
         If no direct magnet, downloads .torrent and constructs one.
         Returns: (magnet_link, info_hash) or (None, None)
         """
-        # First try direct magnet/download URLs
+        import re
+        import urllib.parse
+        
+        # Helper to extract hash from magnet
+        def extract_hash(magnet):
+            match = re.search(r'btih:([a-fA-F0-9]{40})', magnet, re.IGNORECASE)
+            return match.group(1).upper() if match else None
+        
+        # First try magnetUrl field
         magnet = result.get('magnetUrl')
         if magnet and magnet.startswith('magnet:'):
-            # Extract hash from magnet
-            import re
-            match = re.search(r'btih:([a-fA-F0-9]{40})', magnet)
-            if match:
-                return magnet, match.group(1).upper()
+            info_hash = extract_hash(magnet)
+            if info_hash:
+                print(f"Found magnet in magnetUrl: {info_hash}")
+                return magnet, info_hash
         
-        # No direct magnet - try to download .torrent
+        # Check if downloadUrl is actually a magnet link
         download_url = result.get('downloadUrl')
+        if download_url and download_url.startswith('magnet:'):
+            info_hash = extract_hash(download_url)
+            if info_hash:
+                print(f"Found magnet in downloadUrl: {info_hash}")
+                return download_url, info_hash
+        
+        # No magnet - try to download .torrent file
         if not download_url:
             return None, None
         
@@ -90,8 +104,6 @@ class ProwlarrClient:
         
         # Construct magnet link
         title = result.get('title') or name or 'Unknown'
-        # URL encode the title for the magnet link
-        import urllib.parse
         encoded_title = urllib.parse.quote(title)
         magnet = f"magnet:?xt=urn:btih:{info_hash}&dn={encoded_title}"
         
