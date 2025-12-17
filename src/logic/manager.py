@@ -17,7 +17,7 @@ class Manager:
         self.plex = PlexClient()
         self.prowlarr = ProwlarrClient()
         self.quality = QualityManager()
-        self.scraper = get_scraper()
+        self.scraper = MultiScraper(debrid_client=self.debrid)
 
     def _check_anime_status(self, tmdb_id, media_type):
         """

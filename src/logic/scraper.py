@@ -41,13 +41,49 @@ class MultiScraper:
     - Deduplication by hash
     """
     
-    def __init__(self):
+    def __init__(self, debrid_client=None):
         self.torrentio = get_torrentio_client()
         self.prowlarr = ProwlarrClient()
+        self.debrid_client = debrid_client
         self.parser = TorrentParser(
             quality_profile=config.get().quality_profile,
             allow_4k=config.get().allow_4k
         )
+
+    def _scrape_torbox(self, query: str) -> List[ScrapedTorrent]:
+        """Scrape directly from Torbox Voyager."""
+        if not self.debrid_client or not hasattr(self.debrid_client, 'search'):
+            return []
+
+        print(f"[Scraper] Searching Torbox (Voyager) for: {query}")
+        results = []
+        try:
+            items = self.debrid_client.search(query)
+            for item in items:
+                raw_title = item.get('name') or item.get('title')
+                info_hash = item.get('hash') or item.get('info_hash')
+                
+                if not raw_title or not info_hash:
+                    continue
+                    
+                parsed = self.parser.parse(raw_title, info_hash)
+                 # Note: Torbox search results are usually cached or highly available
+                st = ScrapedTorrent(
+                    info_hash=info_hash,
+                    raw_title=raw_title,
+                    parsed=parsed,
+                    source="torbox",
+                    seeders=int(item.get('seeds', item.get('seeders', 0))),
+                    size_bytes=int(item.get('size', 0)),
+                    magnet_link=item.get('magnet')
+                )
+                results.append(st)
+        except Exception as e:
+            print(f"[Scraper] Torbox search error: {e}")
+            
+        return results
+
+
         
         # Check which services are available
         self.torrentio_available = self._check_torrentio()
@@ -81,6 +117,15 @@ class MultiScraper:
             List of scraped torrents, ranked by quality
         """
         results = []
+
+        # 0. Torbox Direct (Highest Priority)
+        try:
+            torbox_results = self._scrape_torbox(f"{title} {year}")
+            for st in torbox_results:
+                if self.parser.validate_for_movie(st.parsed) and self.parser.filter_by_quality(st.parsed):
+                    results.append(st)
+        except Exception as e:
+            print(f"[Scraper] Torbox movie error: {e}")
         
         # Try Torrentio first if we have IMDB ID
         if imdb_id and self.torrentio_available:
@@ -126,6 +171,15 @@ class MultiScraper:
         """
         results = []
         
+        # 0. Torbox Direct (Highest Priority)
+        try:
+            torbox_results = self._scrape_torbox(f"{title} S{season:02d}E{episode:02d}")
+            for st in torbox_results:
+                if self.parser.validate_for_episode(st.parsed, season, episode) and self.parser.filter_by_quality(st.parsed):
+                    results.append(st)
+        except Exception as e:
+            print(f"[Scraper] Torbox episode error: {e}")
+
         # Try Torrentio first if we have IMDB ID
         if imdb_id and self.torrentio_available:
             print(f"[Scraper] Trying Torrentio for: {title} S{season:02d}E{episode:02d}")

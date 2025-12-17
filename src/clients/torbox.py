@@ -101,3 +101,18 @@ class TorboxClient(DebridClient):
             print(f"[Torbox] List Error: {e}")
             return []
 
+    def search(self, query: str) -> List[Dict[str, Any]]:
+        """Search for torrents on Torbox (Voyager)."""
+        # Note: Endpoint surmised from wrapper usage, may need adjustment if distinct from 'checkcached'
+        url = f"{self.base_url}/torrents/search"
+        params = {"query": query}
+        try:
+            resp = requests.get(url, params=params, headers=self._headers())
+            resp.raise_for_status()
+            data = resp.json()
+            # Expecting list of dicts with 'name', 'hash', 'size', etc.
+            return data.get('data', []) if isinstance(data, dict) else data
+        except Exception as e:
+            print(f"[Torbox] Search Error: {e}")
+            return []
+
