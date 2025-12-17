@@ -29,6 +29,8 @@ manager = Manager()
 def run_sync_watchlist():
     logger.info("Running Watchlist Sync...")
     manager.sync_watchlist()
+    # Also trigger running series sync after watchlist
+    manager.sync_running_series()
 
 def run_process_pending():
     logger.info("Processing Pending Items...")
@@ -38,13 +40,21 @@ def run_process_downloads():
     logger.info("Processing Downloads...")
     manager.process_downloads()
 
+def run_retry_failed():
+    logger.info("Retrying Failed Downloads...")
+    manager.retry_failed_downloads()
+
 @app.on_event("startup")
 async def startup_event():
     # Start scheduler
     interval = config.get().scan_interval
     scheduler.add_job(run_sync_watchlist, 'interval', minutes=interval)
-    scheduler.add_job(run_process_pending, 'interval', minutes=2) # Check pending often
-    scheduler.add_job(run_process_downloads, 'interval', minutes=1) # Check downloads often
+    scheduler.add_job(run_process_pending, 'interval', minutes=2)
+    scheduler.add_job(run_process_downloads, 'interval', minutes=1)
+
+    # Retry logic every hour
+    scheduler.add_job(run_retry_failed, 'interval', minutes=60)
+
     scheduler.start()
     logger.info("Scheduler started.")
 
