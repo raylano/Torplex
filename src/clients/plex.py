@@ -4,8 +4,8 @@ from src.config import config
 
 class PlexClient:
     def get_watchlist(self, token):
-        # https://metadata.provider.plex.tv/library/sections/watchlist/all?X-Plex-Token={token}
-        url = f"https://metadata.provider.plex.tv/library/sections/watchlist/all"
+        # Updated URL: https://discover.provider.plex.tv/library/sections/watchlist/all?X-Plex-Token={token}
+        url = f"https://discover.provider.plex.tv/library/sections/watchlist/all"
         headers = {
             "Accept": "application/json",
             "X-Plex-Token": token
