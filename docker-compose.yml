@@ -2,13 +2,13 @@ services:
   # The Brain: Our Python Application
   app:
     build: .
-    container_name: torbox_plex_manager
+    container_name: torplex_torbox_plex_manager
     restart: unless-stopped
     volumes:
       - ./config:/config
       - ./data:/data
       # Mount the rclone share so the app can see the files
-      - /mnt/torbox:/mnt/torbox:rshared
+      - /mnt/torbox:/mnt/torbox:shared
       # Mount the media folder where symlinks will be created
       - ./media:/mnt/media
     environment:
@@ -27,24 +27,19 @@ services:
   # Rclone: Mounts Torbox WebDAV
   rclone:
     image: rclone/rclone:latest
-    container_name: rclone_mount
+    container_name: torplex_rclone
     restart: unless-stopped
-    devices:
-      - /dev/fuse:/dev/fuse
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
+    privileged: true
     volumes:
       - ./config/rclone:/config/rclone
-      - /mnt/torbox:/mnt/torbox:rshared
+      - /mnt/torbox:/mnt/torbox:shared
     command: "mount torbox: /mnt/torbox --allow-other --dir-cache-time 10s --vfs-cache-mode full"
     profiles: ["core", "plex"]
 
   # Prowlarr: Indexer Manager
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
-    container_name: prowlarr
+    container_name: torplex_prowlarr
     environment:
       - PUID=1000
       - PGID=1000
@@ -59,7 +54,7 @@ services:
   # Flaresolverr: Often needed for Prowlarr to bypass Cloudflare
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: flaresolverr
+    container_name: torplex_flaresolverr
     environment:
       - LOG_LEVEL=info
     ports:
@@ -70,7 +65,7 @@ services:
   # Plex Media Server (Optional)
   plex:
     image: lscr.io/linuxserver/plex:latest
-    container_name: plex
+    container_name: torplex_plex
     network_mode: host
     environment:
       - PUID=1000

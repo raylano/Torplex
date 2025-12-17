@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -14,7 +15,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Torbox Plex Manager")
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="src/app/static"), name="static")
+static_path = Path("src/app/static")
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+else:
+    logger.warning("Static directory not found, skipping mount.")
 
 # Templates
 templates = Jinja2Templates(directory="src/app/templates")

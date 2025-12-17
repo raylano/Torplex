@@ -29,7 +29,7 @@ class ConfigManager:
             with open(self.config_path, "r") as f:
                 data = yaml.safe_load(f)
                 if data:
-                    self.settings = self.settings.copy(update=data)
+                    self.settings = self.settings.model_copy(update=data)
         else:
             self.save()
 

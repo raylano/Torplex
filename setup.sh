@@ -102,7 +102,19 @@ fi
 
 # 5. Start
 echo -e "${BLUE}Setup complete. Starting services...${NC}"
-docker-compose up -d
+
+# Cleanup old/conflicting containers
+echo -e "${BLUE}Cleaning up old containers...${NC}"
+docker rm -f prowlarr torplex_prowlarr 2>/dev/null || true
+docker rm -f rclone_mount torplex_rclone 2>/dev/null || true
+docker rm -f torbox_plex_manager torplex_torbox_plex_manager 2>/dev/null || true
+
+# Create host mount point for rclone FUSE
+echo -e "${BLUE}Creating mount points...${NC}"
+sudo mkdir -p /mnt/torbox
+sudo chmod 777 /mnt/torbox
+
+docker compose up -d --build
 
 echo -e "${GREEN}Stack is running!${NC}"
 echo -e "Manager UI: http://localhost:8000"
