@@ -36,8 +36,9 @@ class Manager:
         orig_lang = getattr(details, 'original_language', '')
 
         # 16 = Animation.
-        # Language = ja (Japanese).
-        if 16 in genres and orig_lang == 'ja':
+        # Language = ja (Japanese) or zh (Chinese/Donghua)
+        if 16 in genres and orig_lang in ['ja', 'zh']:
+            print(f"Detected as anime/donghua: lang={orig_lang}, genres={genres}")
             return 1
         return 0
 
@@ -236,12 +237,15 @@ class Manager:
 
     def process_downloads(self):
         items = db.get_downloading_items()
+        print(f"Process downloads: {len(items)} items with DOWNLOADING status")
 
         torbox_list_resp = self.torbox.get_torrents()
         if not torbox_list_resp or 'data' not in torbox_list_resp:
+            print("No torrents in Torbox list")
             return
 
         torbox_items = torbox_list_resp['data']
+        print(f"Torbox has {len(torbox_items)} torrents")
         torbox_map = { t['hash']: t for t in torbox_items }
 
         for item in items:
@@ -269,8 +273,10 @@ class Manager:
         source_dir = mount_path / torrent_name
 
         search_path = mount_path / torrent_name
+        print(f"Looking for files in: {search_path}")
         if not search_path.exists():
-             return
+            print(f"Path does not exist: {search_path}")
+            return
 
         video_extensions = ['.mkv', '.mp4', '.avi']
         best_file = None
