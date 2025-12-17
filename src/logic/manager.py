@@ -175,54 +175,50 @@ class Manager:
                 db.update_status(row_id, "NOT_FOUND")
                 continue
 
-            top_candidates = filtered[:3]  # Limit to 3 to avoid too many torrent downloads
+            top_candidates = filtered[:5]  # Check up to 5 for cache
             hashes = []
             magnet_map = {}
             
             print(f"Processing {len(top_candidates)} candidates for {query}...")
 
+            # Extract magnets for multiple candidates (so we can check cache)
             for i, res in enumerate(top_candidates):
                 print(f"  Candidate {i+1}: {res.get('title', 'Unknown')[:60]}...")
                 magnet, info_hash = self.prowlarr.get_magnet_from_result(res)
                 if magnet and info_hash:
                     hashes.append(info_hash)
                     magnet_map[info_hash] = magnet
-                    break  # Got one, that's enough for now
+                    # Don't break - collect multiple for cache check
 
             if not hashes:
                 print(f"No magnet links could be extracted for {query}")
                 db.update_status(row_id, "NOT_FOUND")
                 continue
 
-            # Check if cached on Torbox
+            # Check cache for ALL collected hashes
+            print(f"Checking cache for {len(hashes)} hashes...")
             cache_result = self.torbox.check_cached(hashes)
-            found_hash = None
+            cached_hashes = []
 
             if isinstance(cache_result, dict) and 'data' in cache_result:
-                 cache_list = cache_result['data']
+                cache_list = cache_result['data']
             else:
-                 cache_list = cache_result
+                cache_list = cache_result
 
             if isinstance(cache_list, list):
-                for h in hashes:
-                    if h in cache_list:
-                        found_hash = h
-                        break
+                cached_hashes = [h for h in hashes if h in cache_list]
             elif isinstance(cache_list, dict):
-                 for h in hashes:
-                    if h in cache_list and cache_list[h]:
-                        found_hash = h
-                        break
+                cached_hashes = [h for h in hashes if h in cache_list and cache_list[h]]
 
-            # Use first hash regardless of cache status
-            use_hash = found_hash if found_hash else hashes[0]
-            magnet = magnet_map[use_hash]
-            
-            if found_hash:
-                print(f"Found cached on Torbox: {query}")
+            # PRIORITY: Use cached hash if available, otherwise first (highest seeded)
+            if cached_hashes:
+                use_hash = cached_hashes[0]  # First cached
+                print(f"✓ Found {len(cached_hashes)} cached! Using: {use_hash[:16]}...")
             else:
-                print(f"Not cached, adding anyway: {query}")
+                use_hash = hashes[0]  # First non-cached (highest seeded)
+                print(f"✗ No cached torrents, using highest seeded: {use_hash[:16]}...")
             
+            magnet = magnet_map[use_hash]
             resp = self.torbox.add_magnet(magnet)
             if resp and resp.get('success'):
                 db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=use_hash)
