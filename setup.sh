@@ -109,12 +109,18 @@ docker rm -f prowlarr torplex_prowlarr 2>/dev/null || true
 docker rm -f rclone_mount torplex_rclone 2>/dev/null || true
 docker rm -f torbox_plex_manager torplex_torbox_plex_manager 2>/dev/null || true
 
+# Cleanup potential stale mounts on host
+echo -e "${BLUE}Cleaning up stale mounts...${NC}"
+sudo umount -l /mnt/torbox 2>/dev/null || true
+sudo fusermount -uz /mnt/torbox 2>/dev/null || true
+
 # Create host mount point for rclone FUSE
 echo -e "${BLUE}Creating mount points...${NC}"
 sudo mkdir -p /mnt/torbox
 sudo chmod 777 /mnt/torbox
 
-docker compose up -d --build
+docker compose build --no-cache
+docker compose up -d
 
 echo -e "${GREEN}Stack is running!${NC}"
 echo -e "Manager UI: http://localhost:8000"

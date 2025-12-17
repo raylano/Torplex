@@ -9,3 +9,4 @@ aiofiles
 httpx
 pyyaml
 loguru
+python-multipart

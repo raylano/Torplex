@@ -33,7 +33,7 @@ services:
     volumes:
       - ./config/rclone:/config/rclone
       - /mnt/torbox:/mnt/torbox:shared
-    command: "mount torbox: /mnt/torbox --allow-other --dir-cache-time 10s --vfs-cache-mode full"
+    command: "mount torbox: /mnt/torbox --allow-other --dir-cache-time 10s --vfs-cache-mode full --allow-non-empty"
     profiles: ["core", "plex"]
 
   # Prowlarr: Indexer Manager
