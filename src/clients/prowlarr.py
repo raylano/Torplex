@@ -37,12 +37,45 @@ class ProwlarrClient:
     def download_torrent(self, download_url):
         """
         Download .torrent file via Prowlarr's proxy and extract info_hash.
+        Handles case where Prowlarr redirects to a magnet link.
         Returns tuple: (info_hash, name) or (None, None) on failure.
         """
+        import re
+        
         try:
             print(f"Downloading torrent from Prowlarr...")
-            resp = requests.get(download_url, timeout=30)
-            resp.raise_for_status()
+            
+            # Don't follow redirects - check if it redirects to a magnet
+            resp = requests.get(download_url, timeout=30, allow_redirects=False)
+            
+            # Check for redirect to magnet link
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get('Location', '')
+                if location.startswith('magnet:'):
+                    print(f"Prowlarr redirected to magnet link!")
+                    match = re.search(r'btih:([a-fA-F0-9]{40})', location, re.IGNORECASE)
+                    if match:
+                        info_hash = match.group(1).upper()
+                        print(f"Extracted hash from redirect: {info_hash}")
+                        return info_hash, location  # Return magnet as name placeholder
+            
+            # Not a redirect, or not to magnet - try to get the content
+            if resp.status_code != 200:
+                # Follow redirects this time if needed
+                resp = requests.get(download_url, timeout=30)
+                resp.raise_for_status()
+            
+            # Check if response content is actually a magnet link (text response)
+            content_type = resp.headers.get('Content-Type', '')
+            if 'text' in content_type or len(resp.content) < 1000:
+                content_text = resp.content.decode('utf-8', errors='ignore')
+                if content_text.startswith('magnet:'):
+                    print(f"Response is a magnet link!")
+                    match = re.search(r'btih:([a-fA-F0-9]{40})', content_text, re.IGNORECASE)
+                    if match:
+                        info_hash = match.group(1).upper()
+                        print(f"Extracted hash from response: {info_hash}")
+                        return info_hash, content_text
             
             # Parse the .torrent file (bencoded data)
             torrent_data = bencodepy.decode(resp.content)
@@ -57,7 +90,7 @@ class ProwlarrClient:
             # Get torrent name
             name = info.get(b'name', b'Unknown').decode('utf-8', errors='ignore')
             
-            print(f"Extracted hash: {info_hash} for: {name}")
+            print(f"Extracted hash from .torrent: {info_hash} for: {name}")
             return info_hash, name
             
         except Exception as e:
