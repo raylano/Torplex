@@ -261,10 +261,13 @@ class Database:
             """)
             items = c.fetchall()
         elif filter_type == 'completed':
-            # Movies that are completed + Series where ALL episodes are completed
+            # Get completed movies and fully completed series separately
+            # Movies
+            c.execute("SELECT * FROM media_items WHERE media_type = 'movie' AND status = 'COMPLETED' ORDER BY updated_at DESC")
+            movies = c.fetchall()
+            
+            # Series where ALL episodes are completed
             c.execute("""
-                SELECT * FROM media_items WHERE media_type = 'movie' AND status = 'COMPLETED'
-                UNION ALL
                 SELECT parent_tmdb_id as tmdb_id, 
                        MIN(title) as title, 
                        'series' as media_type, 
@@ -274,14 +277,22 @@ class Database:
                        MAX(id) as id,
                        'COMPLETED' as status,
                        MAX(created_at) as created_at,
-                       NULL, NULL, NULL, NULL, NULL
+                       NULL as updated_at,
+                       NULL as magnet_link,
+                       NULL as torbox_hash,
+                       NULL as symlink_path,
+                       0 as is_anime,
+                       NULL as error_message
                 FROM media_items 
                 WHERE media_type = 'episode' 
                 GROUP BY parent_tmdb_id
                 HAVING COUNT(*) = SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END)
                 ORDER BY created_at DESC
             """)
-            items = c.fetchall()
+            series = c.fetchall()
+            
+            # Combine and sort
+            items = list(movies) + list(series)
         elif filter_type == 'pending':
             c.execute("SELECT * FROM media_items WHERE status IN ('PENDING', 'DOWNLOADING') ORDER BY created_at DESC")
             items = c.fetchall()

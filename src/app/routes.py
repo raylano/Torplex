@@ -84,23 +84,38 @@ async def search_page(request: Request, q: str = ""):
         
         # Add media_type to each result
         for m in movie_results:
-            results.append({
-                'id': m.id,
-                'title': getattr(m, 'title', 'Unknown'),
-                'year': getattr(m, 'release_date', '')[:4] if getattr(m, 'release_date', None) else '',
-                'media_type': 'movie',
-                'poster_path': getattr(m, 'poster_path', None),
-                'overview': getattr(m, 'overview', '')[:150]
-            })
+            # Skip if not a proper object
+            if not hasattr(m, 'id'):
+                continue
+            try:
+                results.append({
+                    'id': m.id,
+                    'title': getattr(m, 'title', 'Unknown'),
+                    'year': getattr(m, 'release_date', '')[:4] if getattr(m, 'release_date', None) else '',
+                    'media_type': 'movie',
+                    'poster_path': getattr(m, 'poster_path', None),
+                    'overview': getattr(m, 'overview', '')[:150] if getattr(m, 'overview', None) else ''
+                })
+            except Exception as e:
+                print(f"Error processing movie result: {e}")
+                continue
+                
         for t in tv_results:
-            results.append({
-                'id': t.id,
-                'title': getattr(t, 'name', 'Unknown'),
-                'year': getattr(t, 'first_air_date', '')[:4] if getattr(t, 'first_air_date', None) else '',
-                'media_type': 'tv',
-                'poster_path': getattr(t, 'poster_path', None),
-                'overview': getattr(t, 'overview', '')[:150]
-            })
+            # Skip if not a proper object
+            if not hasattr(t, 'id'):
+                continue
+            try:
+                results.append({
+                    'id': t.id,
+                    'title': getattr(t, 'name', 'Unknown'),
+                    'year': getattr(t, 'first_air_date', '')[:4] if getattr(t, 'first_air_date', None) else '',
+                    'media_type': 'tv',
+                    'poster_path': getattr(t, 'poster_path', None),
+                    'overview': getattr(t, 'overview', '')[:150] if getattr(t, 'overview', None) else ''
+                })
+            except Exception as e:
+                print(f"Error processing TV result: {e}")
+                continue
         
         # Sort by relevance (movies first, then TV)
         results.sort(key=lambda x: (0 if x['media_type'] == 'movie' else 1, x['title']))
