@@ -17,6 +17,58 @@ async def dashboard(request: Request):
     stats = db.get_stats()
     return templates.TemplateResponse("dashboard.html", {"request": request, "stats": stats})
 
+@router.get("/library/{filter_type}", response_class=HTMLResponse)
+async def library(request: Request, filter_type: str):
+    """Filtered library view (movies, series, completed, pending)."""
+    items = db.get_library_items(filter_type)
+    return templates.TemplateResponse("library.html", {
+        "request": request, 
+        "items": items, 
+        "filter_type": filter_type
+    })
+
+@router.get("/media/{item_id}", response_class=HTMLResponse)
+async def media_detail(request: Request, item_id: int):
+    """Media item detail page with TMDB info."""
+    item = db.get_item_by_id(item_id)
+    if not item:
+        return RedirectResponse(url="/")
+    
+    # Get TMDB details for poster and info
+    details = None
+    episodes = None
+    
+    if item['media_type'] == 'movie':
+        details = tmdb.get_movie_details(item['tmdb_id'])
+    elif item['media_type'] == 'episode':
+        # Get show details and all episodes for this series
+        if item['parent_tmdb_id']:
+            details = tmdb.get_tv_details(item['parent_tmdb_id'])
+            episodes = db.get_series_episodes(item['parent_tmdb_id'])
+    
+    # Convert details to dict for template
+    details_dict = None
+    if details:
+        details_dict = {
+            'overview': getattr(details, 'overview', ''),
+            'vote_average': getattr(details, 'vote_average', None),
+            'runtime': getattr(details, 'runtime', None),
+            'genres': [{'name': g.name if hasattr(g, 'name') else g['name']} for g in getattr(details, 'genres', [])],
+            'poster_path': getattr(details, 'poster_path', None)
+        }
+    
+    # Add poster_path to item if from TMDB
+    item_dict = dict(item)
+    if details_dict and details_dict.get('poster_path'):
+        item_dict['poster_path'] = details_dict['poster_path']
+    
+    return templates.TemplateResponse("media_detail.html", {
+        "request": request,
+        "item": item_dict,
+        "details": details_dict,
+        "episodes": episodes
+    })
+
 @router.get("/series", response_class=HTMLResponse)
 async def series(request: Request):
     items = db.get_tracked_series()

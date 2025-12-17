@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block content %}
+<a href="javascript:history.back()" class="btn btn-glass mb-4">← Back</a>
+
+<div class="row g-4">
+    <!-- Poster Column -->
+    <div class="col-md-4 animate-in">
+        {% if item.poster_path %}
+        <img src="https://image.tmdb.org/t/p/w500{{ item.poster_path }}" class="media-poster w-100"
+            alt="{{ item.title }}">
+        {% else %}
+        <div class="glass-card d-flex align-items-center justify-content-center" style="height: 400px;">
+            <span class="fs-1">🎬</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Info Column -->
+    <div class="col-md-8 animate-in animate-delay-1">
+        <div class="glass-card p-4">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h2 class="mb-1">{{ item.title }}</h2>
+                    <p class="text-muted mb-0">
+                        {% if item.year %}{{ item.year }}{% endif %}
+                        {% if item.media_type == 'episode' %}
+                        • Season {{ item.season_number }} Episode {{ item.episode_number }}
+                        {% endif %}
+                    </p>
+                </div>
+                <span class="badge-status 
+                    {% if item.status == 'COMPLETED' %}badge-completed
+                    {% elif item.status == 'DOWNLOADING' %}badge-downloading
+                    {% elif item.status == 'PENDING' %}badge-pending
+                    {% else %}badge-failed{% endif %}">
+                    {{ item.status }}
+                </span>
+            </div>
+
+            {% if details and details.overview %}
+            <p class="mb-4" style="color: rgba(255,255,255,0.8);">{{ details.overview }}</p>
+            {% endif %}
+
+            <div class="row g-3 mb-4">
+                {% if details %}
+                <div class="col-md-4">
+                    <div class="text-muted small">Rating</div>
+                    <div class="fw-bold">⭐ {{ details.vote_average | round(1) if details.vote_average else 'N/A' }}
+                    </div>
+                </div>
+                {% if details.genres %}
+                <div class="col-md-4">
+                    <div class="text-muted small">Genres</div>
+                    <div class="fw-bold">{{ details.genres[:2] | map(attribute='name') | join(', ') if details.genres
+                        else 'N/A' }}</div>
+                </div>
+                {% endif %}
+                {% if details.runtime %}
+                <div class="col-md-4">
+                    <div class="text-muted small">Runtime</div>
+                    <div class="fw-bold">{{ details.runtime }} min</div>
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+
+            <!-- Actions -->
+            <div class="d-flex gap-2">
+                {% if item.status == 'NOT_FOUND' or item.status == 'PENDING' %}
+                <form hx-post="/retry/{{ item.id }}" hx-swap="outerHTML">
+                    <button type="submit" class="btn btn-gradient">🔄 Retry Download</button>
+                </form>
+                {% endif %}
+                {% if item.torbox_hash %}
+                <div class="btn btn-glass">
+                    <small class="text-muted">Hash:</small> {{ item.torbox_hash[:16] }}...
+                </div>
+                {% endif %}
+            </div>
+
+            {% if item.error_message %}
+            <div class="alert mt-4" style="background: rgba(235, 51, 73, 0.2); color: #f45c43;">
+                <strong>Error:</strong> {{ item.error_message }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Episodes (for series) -->
+{% if episodes %}
+<div class="glass-card p-4 mt-4 animate-in animate-delay-2">
+    <h5 class="mb-4">📺 Episodes</h5>
+
+    {% for season, eps in episodes.items() %}
+    <div class="mb-4">
+        <h6 class="text-muted mb-3">Season {{ season }}</h6>
+        <div class="row g-2">
+            {% for ep in eps %}
+            <div class="col-md-6 col-lg-4">
+                <div class="list-item-glass d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="badge-status 
+                            {% if ep.status == 'COMPLETED' %}badge-completed
+                            {% elif ep.status == 'DOWNLOADING' %}badge-downloading
+                            {% elif ep.status == 'PENDING' %}badge-pending
+                            {% else %}badge-failed{% endif %}" style="padding: 0.25rem 0.5rem; font-size: 0.6rem;">
+                            {{ ep.status[:4] }}
+                        </span>
+                        <span class="text-white">E{{ ep.episode_number }}: {{ ep.title[:30] }}{% if ep.title|length > 30
+                            %}...{% endif %}</span>
+                    </div>
+                    {% if ep.status == 'NOT_FOUND' %}
+                    <form hx-post="/retry/{{ ep.id }}" hx-swap="outerHTML">
+                        <button type="submit" class="btn btn-glass btn-sm" style="padding: 0.25rem 0.5rem;">🔄</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

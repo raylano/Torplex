@@ -227,4 +227,67 @@ class Database:
         conn.close()
         return count
 
+    def get_library_items(self, filter_type):
+        """Get items filtered by type (movies, series, completed, pending)."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        
+        if filter_type == 'movies':
+            c.execute("SELECT * FROM media_items WHERE media_type = 'movie' ORDER BY created_at DESC")
+        elif filter_type == 'series':
+            # Get unique series from episodes
+            c.execute("""
+                SELECT DISTINCT parent_tmdb_id as tmdb_id, title, 'episode' as media_type, 
+                       year, NULL as season_number, NULL as episode_number,
+                       MAX(id) as id, status, created_at
+                FROM media_items 
+                WHERE media_type = 'episode' 
+                GROUP BY parent_tmdb_id
+                ORDER BY created_at DESC
+            """)
+        elif filter_type == 'completed':
+            c.execute("SELECT * FROM media_items WHERE status = 'COMPLETED' ORDER BY updated_at DESC")
+        elif filter_type == 'pending':
+            c.execute("SELECT * FROM media_items WHERE status IN ('PENDING', 'DOWNLOADING') ORDER BY created_at DESC")
+        elif filter_type == 'failed':
+            c.execute("SELECT * FROM media_items WHERE status = 'NOT_FOUND' ORDER BY updated_at DESC")
+        else:
+            c.execute("SELECT * FROM media_items ORDER BY created_at DESC")
+        
+        items = c.fetchall()
+        conn.close()
+        return items
+
+    def get_item_by_id(self, item_id):
+        """Get a single item by ID."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT * FROM media_items WHERE id = ?", (item_id,))
+        item = c.fetchone()
+        conn.close()
+        return item
+
+    def get_series_episodes(self, parent_tmdb_id):
+        """Get all episodes for a series, grouped by season."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT * FROM media_items 
+            WHERE parent_tmdb_id = ? AND media_type = 'episode'
+            ORDER BY season_number, episode_number
+        """, (str(parent_tmdb_id),))
+        episodes = c.fetchall()
+        conn.close()
+        
+        # Group by season
+        grouped = {}
+        for ep in episodes:
+            season = ep['season_number'] or 1
+            if season not in grouped:
+                grouped[season] = []
+            grouped[season].append(dict(ep))
+        
+        return grouped
+
 db = Database()
+

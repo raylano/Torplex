@@ -1,160 +1,144 @@
 {% extends "base.html" %}
 
 {% block content %}
-<!-- Stats Cards -->
+<!-- Stats Cards - Clickable -->
 <div class="row g-4 mb-4">
-    <div class="col-md-3">
-        <div class="card bg-primary text-white h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="card-subtitle mb-1 opacity-75">Movies</h6>
-                        <h2 class="card-title mb-0">{{ stats.movies }}</h2>
-                    </div>
-                    <div class="fs-1 opacity-50">🎬</div>
+    <div class="col-md-3 animate-in animate-delay-1">
+        <a href="/library/movies" class="stat-card primary">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-number">{{ stats.movies }}</div>
+                    <div class="stat-label">Movies</div>
                 </div>
+                <div class="fs-1 opacity-50">🎬</div>
             </div>
-        </div>
+        </a>
     </div>
-    <div class="col-md-3">
-        <div class="card bg-info text-white h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="card-subtitle mb-1 opacity-75">Series</h6>
-                        <h2 class="card-title mb-0">{{ stats.series }}</h2>
-                    </div>
-                    <div class="fs-1 opacity-50">📺</div>
+    <div class="col-md-3 animate-in animate-delay-2">
+        <a href="/library/series" class="stat-card accent">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-number">{{ stats.series }}</div>
+                    <div class="stat-label">Series</div>
                 </div>
+                <div class="fs-1 opacity-50">📺</div>
             </div>
-        </div>
+        </a>
     </div>
-    <div class="col-md-3">
-        <div class="card bg-success text-white h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="card-subtitle mb-1 opacity-75">Completed</h6>
-                        <h2 class="card-title mb-0">{{ stats.completed }}</h2>
-                    </div>
-                    <div class="fs-1 opacity-50">✓</div>
+    <div class="col-md-3 animate-in animate-delay-3">
+        <a href="/library/completed" class="stat-card success">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-number">{{ stats.completed }}</div>
+                    <div class="stat-label">Completed</div>
                 </div>
+                <div class="fs-1 opacity-50">✓</div>
             </div>
-        </div>
+        </a>
     </div>
-    <div class="col-md-3">
-        <div class="card bg-warning text-dark h-100">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="card-subtitle mb-1 opacity-75">Pending</h6>
-                        <h2 class="card-title mb-0">{{ stats.pending + stats.downloading }}</h2>
-                    </div>
-                    <div class="fs-1 opacity-50">⏳</div>
+    <div class="col-md-3 animate-in animate-delay-4">
+        <a href="/library/pending" class="stat-card warning">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="stat-number">{{ stats.pending + stats.downloading }}</div>
+                    <div class="stat-label">Pending</div>
                 </div>
+                <div class="fs-1 opacity-50">⏳</div>
             </div>
-        </div>
+        </a>
     </div>
 </div>
 
-<!-- Status Breakdown -->
-<div class="row g-4 mb-4">
+<!-- Main Content -->
+<div class="row g-4">
     <div class="col-md-8">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Recent Activity</h5>
-                <button class="btn btn-sm btn-outline-primary" hx-get="/trigger" hx-swap="none">
-                    🔄 Sync Now
-                </button>
+        <div class="glass-card p-4">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h5 class="mb-0">📋 Recent Activity</h5>
+                <button class="btn btn-glass btn-sm" hx-get="/trigger" hx-swap="none">🔄 Sync</button>
             </div>
-            <div class="card-body p-0">
-                <div class="list-group list-group-flush">
-                    {% for item in stats.recent %}
-                    <div class="list-group-item d-flex justify-content-between align-items-center">
-                        <div>
-                            <span class="badge 
-                                {% if item.status == 'COMPLETED' %}bg-success
-                                {% elif item.status == 'DOWNLOADING' %}bg-primary
-                                {% elif item.status == 'PENDING' %}bg-warning text-dark
-                                {% else %}bg-danger{% endif %}
-                            ">
-                                {{ item.status }}
-                            </span>
-                            <span class="ms-2">{{ item.title }}</span>
-                            {% if item.media_type == 'episode' %}
-                            <small class="text-muted">S{{ item.season_number }}E{{ item.episode_number }}</small>
-                            {% endif %}
-                        </div>
-                        <small class="text-muted">{{ item.year or '' }}</small>
+
+            {% for item in stats.recent %}
+            <a href="/media/{{ item.id }}"
+                class="list-item-glass d-flex justify-content-between align-items-center text-decoration-none">
+                <div class="d-flex align-items-center gap-3">
+                    <span class="badge-status 
+                        {% if item.status == 'COMPLETED' %}badge-completed
+                        {% elif item.status == 'DOWNLOADING' %}badge-downloading
+                        {% elif item.status == 'PENDING' %}badge-pending
+                        {% else %}badge-failed{% endif %}">
+                        {{ item.status }}
+                    </span>
+                    <div>
+                        <div class="text-white fw-medium">{{ item.title }}</div>
+                        {% if item.media_type == 'episode' %}
+                        <small class="text-muted">Season {{ item.season_number }} Episode {{ item.episode_number
+                            }}</small>
+                        {% else %}
+                        <small class="text-muted">{{ item.year or 'Movie' }}</small>
+                        {% endif %}
                     </div>
-                    {% else %}
-                    <div class="list-group-item text-center text-muted py-4">
-                        No items yet. Add some from the Search page!
-                    </div>
-                    {% endfor %}
                 </div>
+                <span class="text-muted">→</span>
+            </a>
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <div class="fs-1 mb-3">🎬</div>
+                <p>No items yet. Start by searching!</p>
+                <a href="/search" class="btn btn-gradient">Search Content</a>
             </div>
+            {% endfor %}
         </div>
     </div>
 
     <div class="col-md-4">
-        <div class="card border-danger">
-            <div class="card-header bg-danger text-white">
-                <h5 class="mb-0">⚠️ Failed Items ({{ stats.failed }})</h5>
-            </div>
-            <div class="card-body p-0">
-                <div class="list-group list-group-flush">
-                    {% for item in stats.failed_items %}
-                    <div class="list-group-item">
-                        <div class="d-flex justify-content-between align-items-start">
-                            <div>
-                                <strong>{{ item.title }}</strong>
-                                <br>
-                                <small class="text-muted">{{ item.error_message or 'No cached torrent found' }}</small>
-                            </div>
-                            <form hx-post="/retry/{{ item.id }}" hx-swap="outerHTML">
-                                <button type="submit" class="btn btn-sm btn-outline-warning">🔄</button>
-                            </form>
-                        </div>
+        <!-- Failed Items -->
+        {% if stats.failed > 0 %}
+        <div class="glass-card p-4 mb-4" style="border-color: rgba(235, 51, 73, 0.3);">
+            <h5 class="mb-3" style="color: #f45c43;">⚠️ Failed ({{ stats.failed }})</h5>
+            {% for item in stats.failed_items %}
+            <div class="list-item-glass">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="text-white fw-medium">{{ item.title }}</div>
+                        <small class="text-muted">{{ item.error_message or 'No cached torrent' }}</small>
                     </div>
-                    {% else %}
-                    <div class="list-group-item text-center text-muted py-3">
-                        No failed items! 🎉
-                    </div>
-                    {% endfor %}
+                    <form hx-post="/retry/{{ item.id }}" hx-swap="outerHTML">
+                        <button type="submit" class="btn btn-glass btn-sm">🔄</button>
+                    </form>
                 </div>
             </div>
+            {% endfor %}
         </div>
+        {% endif %}
 
-        <!-- Quick Stats -->
-        <div class="card mt-3">
-            <div class="card-header">
-                <h5 class="mb-0">📊 Overview</h5>
+        <!-- Overview -->
+        <div class="glass-card p-4">
+            <h5 class="mb-3">📊 Overview</h5>
+            <div class="d-flex justify-content-between mb-3 pb-3"
+                style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <span class="text-muted">Total Items</span>
+                <span class="fw-bold">{{ stats.total }}</span>
             </div>
-            <div class="card-body">
-                <div class="d-flex justify-content-between mb-2">
-                    <span>Total Items:</span>
-                    <strong>{{ stats.total }}</strong>
-                </div>
-                <div class="d-flex justify-content-between mb-2">
-                    <span>Episodes:</span>
-                    <strong>{{ stats.episodes }}</strong>
-                </div>
-                <div class="d-flex justify-content-between mb-2">
-                    <span>Downloading:</span>
-                    <strong>{{ stats.downloading }}</strong>
-                </div>
-                <hr>
-                <div class="d-flex justify-content-between">
-                    <span>Success Rate:</span>
-                    <strong>
-                        {% if stats.total > 0 %}
-                        {{ ((stats.completed / stats.total) * 100) | round(1) }}%
-                        {% else %}
-                        N/A
-                        {% endif %}
-                    </strong>
-                </div>
+            <div class="d-flex justify-content-between mb-3 pb-3"
+                style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <span class="text-muted">Episodes</span>
+                <span class="fw-bold">{{ stats.episodes }}</span>
+            </div>
+            <div class="d-flex justify-content-between mb-3 pb-3"
+                style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                <span class="text-muted">Downloading</span>
+                <span class="fw-bold">{{ stats.downloading }}</span>
+            </div>
+            <div class="d-flex justify-content-between">
+                <span class="text-muted">Success Rate</span>
+                <span class="fw-bold" style="color: #38ef7d;">
+                    {% if stats.total > 0 %}
+                    {{ ((stats.completed / stats.total) * 100) | round(1) }}%
+                    {% else %}
+                    N/A
+                    {% endif %}
+                </span>
             </div>
         </div>
     </div>
