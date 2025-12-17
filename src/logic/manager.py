@@ -324,6 +324,15 @@ class Manager:
             
             if not t_item:
                 print(f"  {title}: hash {item_hash_lower[:16]}... not found in {self.debrid.name}")
+                # Try to recover by re-adding if not in list but marked as downloading
+                # This handles cases where add failed (e.g. limit reached) or item was removed
+                try:
+                    magnet = item['magnet_link']
+                    if magnet:
+                        print(f"  Attempting to re-add missing download to {self.debrid.name}...")
+                        self.debrid.add_magnet(magnet)
+                except Exception as e:
+                    print(f"  Recovery failed: {e}")
                 continue
 
             print(f"  {title}: state={t_item['download_state']}")

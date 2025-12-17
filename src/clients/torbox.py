@@ -21,6 +21,9 @@ class TorboxClient(DebridClient):
 
     def check_cached(self, hash_list: List[str]) -> Dict[str, bool]:
         """Check if hashes are cached in Torbox."""
+        if not hash_list:
+            return {}
+            
         url = f"{self.base_url}/torrents/checkcached"
         hashes_str = ",".join(hash_list)
         params = {"hash": hashes_str, "format": "list"}
@@ -31,14 +34,23 @@ class TorboxClient(DebridClient):
             data = resp.json()
             
             # Torbox returns list of cached hashes
-            # Convert to dict format: {hash: True/False}
-            if isinstance(data.get('data'), list):
-                cached_hashes = set(h.lower() for h in data['data'])
-                return {h.lower(): h.lower() in cached_hashes for h in hash_list}
-            return {h.lower(): False for h in hash_list}
+            # Robustly handle response format (list of strings or dicts)
+            cached_hashes = set()
+            result_data = data.get('data')
+            
+            if isinstance(result_data, list):
+                for h in result_data:
+                    if isinstance(h, str):
+                        cached_hashes.add(h.lower())
+                    elif isinstance(h, dict) and 'hash' in h:
+                        cached_hashes.add(h['hash'].lower())
+            
+            return {h.lower(): h.lower() in cached_hashes for h in hash_list}
         except Exception as e:
             print(f"Torbox Check Cache Error: {e}")
-            return {h.lower(): False for h in hash_list}
+            # Return False for all if check fails, so we don't block logic
+            # Ensure h is string before calling lower()
+            return {str(h).lower(): False for h in hash_list}
 
     def add_magnet(self, magnet_link: str) -> Optional[Dict[str, Any]]:
         """Add a magnet link to Torbox."""
