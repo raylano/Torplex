@@ -10,7 +10,7 @@ services:
       # Mount the rclone share so the app can see the files
       - /mnt/torbox:/mnt/torbox:shared
       # Mount the media folder where symlinks will be created
-      - ./media:/mnt/media
+      - /mnt/media:/mnt/media
     environment:
       - CONFIG_PATH=/config
       - DATA_PATH=/data
