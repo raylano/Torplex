@@ -264,65 +264,143 @@ class Manager:
         mount_path = Path(config.get().mount_path)
         symlink_base = Path(config.get().symlink_path)
 
-        torrent_name = debrid_item.get('name', '')
-        source_dir = mount_path / torrent_name
-
-        search_path = mount_path / torrent_name
-        print(f"Looking for files in: {search_path}")
-        if not search_path.exists():
-            print(f"Path does not exist: {search_path}")
+        debrid_name = debrid_item.get('name', '')
+        
+        # Smart file finder - handles name mismatches between debrid API and actual files
+        best_file = self._find_video_file(mount_path, debrid_name, title, year)
+        
+        if not best_file:
+            print(f"  Could not find video file for: {title}")
             return
 
-        video_extensions = ['.mkv', '.mp4', '.avi']
-        best_file = None
-        max_size = 0
+        print(f"  Found video: {best_file}")
+        
+        clean_title = "".join([c for c in title if c.isalnum() or c in [' ', '-', '_']]).strip()
 
-        if search_path.is_file():
-             if search_path.suffix in video_extensions:
-                best_file = search_path
-        else:
-            for root, dirs, files in os.walk(search_path):
-                for f in files:
-                    fp = Path(root) / f
-                    if fp.suffix in video_extensions:
-                        size = fp.stat().st_size
-                        if size > max_size:
-                            max_size = size
-                            best_file = fp
-
-        if best_file:
-            clean_title = "".join([c for c in title if c.isalnum() or c in [' ', '-', '_']]).strip()
-
-            # Determine Target Directory based on media_type and is_anime
-            if media_type == 'movie':
-                if is_anime:
-                    # Anime Movies -> /mnt/media/animemovies
-                    base_folder = symlink_base / "animemovies"
-                else:
-                    # Movies -> /mnt/media/movies
-                    base_folder = symlink_base / "movies"
-
-                year_str = f" ({year})" if year else ""
-                dest_dir = base_folder / f"{clean_title}{year_str}"
-                dest_file = dest_dir / f"{clean_title}.{best_file.suffix}"
+        # Determine Target Directory based on media_type and is_anime
+        if media_type == 'movie':
+            if is_anime:
+                base_folder = symlink_base / "animemovies"
             else:
-                # TV
-                if is_anime:
-                    # Anime Series -> /mnt/media/animeshows
-                    base_folder = symlink_base / "animeshows"
-                else:
-                    # TV Series -> /mnt/media/tvshows
-                    base_folder = symlink_base / "tvshows"
+                base_folder = symlink_base / "movies"
 
-                dest_dir = base_folder / f"{clean_title}" / f"Season {season}"
-                dest_file = dest_dir / best_file.name
+            year_str = f" ({year})" if year else ""
+            dest_dir = base_folder / f"{clean_title}{year_str}"
+            dest_file = dest_dir / f"{clean_title}{best_file.suffix}"
+        else:
+            # TV
+            if is_anime:
+                base_folder = symlink_base / "animeshows"
+            else:
+                base_folder = symlink_base / "tvshows"
 
-            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_dir = base_folder / f"{clean_title}" / f"Season {season}"
+            dest_file = dest_dir / best_file.name
 
-            if not dest_file.exists():
-                try:
-                    os.symlink(best_file, dest_file)
-                    print(f"Linked: {dest_file} -> {best_file}")
-                    db.update_status(row_id, "COMPLETED", symlink_path=str(dest_file))
-                except Exception as e:
-                    print(f"Symlink Error: {e}")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        if not dest_file.exists():
+            try:
+                os.symlink(best_file, dest_file)
+                print(f"  ✓ Linked: {dest_file.name} -> {best_file}")
+                db.update_status(row_id, "COMPLETED", symlink_path=str(dest_file))
+            except Exception as e:
+                print(f"  ✗ Symlink Error: {e}")
+        else:
+            print(f"  Symlink already exists: {dest_file}")
+            db.update_status(row_id, "COMPLETED", symlink_path=str(dest_file))
+
+    def _find_video_file(self, mount_path: Path, debrid_name: str, title: str, year: int) -> Path:
+        """
+        Smart file finder that handles name mismatches between debrid API and actual files.
+        
+        Strategy:
+        1. Try exact debrid name match
+        2. Try fuzzy title match on folders
+        3. Scan all recent folders if nothing found
+        """
+        video_extensions = ['.mkv', '.mp4', '.avi', '.m4v', '.webm']
+        
+        def find_best_video(search_path: Path) -> Path:
+            """Find largest video file in a path."""
+            if not search_path.exists():
+                return None
+            
+            if search_path.is_file():
+                if search_path.suffix.lower() in video_extensions:
+                    return search_path
+                return None
+            
+            best_file = None
+            max_size = 0
+            
+            try:
+                for root, dirs, files in os.walk(search_path):
+                    for f in files:
+                        fp = Path(root) / f
+                        if fp.suffix.lower() in video_extensions:
+                            try:
+                                size = fp.stat().st_size
+                                if size > max_size:
+                                    max_size = size
+                                    best_file = fp
+                            except:
+                                pass
+            except Exception as e:
+                print(f"  Error scanning {search_path}: {e}")
+            
+            return best_file
+
+        def normalize_name(name: str) -> str:
+            """Normalize name for fuzzy matching."""
+            import re
+            # Remove quality indicators, year in various formats, etc
+            name = name.lower()
+            name = re.sub(r'[\[\(]\d{4}[\]\)]', '', name)  # [2012] or (2012)
+            name = re.sub(r'\b(1080p|720p|4k|2160p|bluray|brrip|webrip|web-dl|x264|x265|hevc|yify|yts)\b', '', name, flags=re.I)
+            name = re.sub(r'[^a-z0-9]', '', name)  # Keep only alphanumeric
+            return name.strip()
+
+        # Strategy 1: Try exact debrid name
+        exact_path = mount_path / debrid_name
+        print(f"  Trying exact path: {exact_path}")
+        result = find_best_video(exact_path)
+        if result:
+            return result
+
+        # Strategy 2: Fuzzy match on title
+        normalized_title = normalize_name(title)
+        print(f"  Exact path failed. Fuzzy matching for: {title}")
+        
+        try:
+            for folder in mount_path.iterdir():
+                if folder.is_dir():
+                    normalized_folder = normalize_name(folder.name)
+                    # Check if title is contained in folder name
+                    if normalized_title in normalized_folder or normalized_folder in normalized_title:
+                        print(f"  Fuzzy match found: {folder.name}")
+                        result = find_best_video(folder)
+                        if result:
+                            return result
+        except Exception as e:
+            print(f"  Error listing mount: {e}")
+
+        # Strategy 3: If year provided, try to match year in folder name
+        if year:
+            print(f"  Trying year-based match for {year}")
+            try:
+                for folder in mount_path.iterdir():
+                    if folder.is_dir() and str(year) in folder.name:
+                        normalized_folder = normalize_name(folder.name)
+                        # Looser match - just check first few chars
+                        if normalized_title[:5] in normalized_folder:
+                            print(f"  Year+prefix match: {folder.name}")
+                            result = find_best_video(folder)
+                            if result:
+                                return result
+            except:
+                pass
+
+        print(f"  No match found for: {title}")
+        return None
+
