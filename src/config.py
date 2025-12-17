@@ -6,6 +6,8 @@ from typing import Optional
 
 class Settings(BaseModel):
     torbox_api_key: str = ""
+    realdebrid_api_key: str = ""
+    debrid_service: str = "torbox"  # 'torbox' or 'realdebrid'
     tmdb_api_key: str = ""
     plex_token: str = ""
     prowlarr_url: str = "http://prowlarr:9696"
@@ -15,8 +17,8 @@ class Settings(BaseModel):
 
     # Advanced settings
     scan_interval: int = 15  # minutes
-    quality_profile: str = "1080p" # Default target. If '1080p', avoids 4K.
-    allow_4k: bool = False # Specific override
+    quality_profile: str = "hd"  # 'hd', 'fhd', 'uhd'
+    allow_4k: bool = False
 
 class ConfigManager:
     def __init__(self):
@@ -36,9 +38,18 @@ class ConfigManager:
     def save(self):
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.config_path, "w") as f:
-            yaml.dump(self.settings.dict(), f)
+            yaml.dump(self.settings.model_dump(), f)
 
     def get(self) -> Settings:
         return self.settings
 
+    def update(self, new_values: dict):
+        """Update settings from a dictionary and save."""
+        # Filter out empty strings for optional fields
+        filtered = {k: v for k, v in new_values.items() if v != "" or k in ['plex_token', 'realdebrid_api_key']}
+        self.settings = self.settings.model_copy(update=filtered)
+        self.save()
+        print(f"Config saved: {self.config_path}")
+
 config = ConfigManager()
+

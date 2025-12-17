@@ -129,6 +129,60 @@ class Database:
         conn.close()
         return items
 
+    def get_stats(self):
+        """Get summary statistics for dashboard."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        
+        stats = {}
+        
+        # Count by status
+        c.execute("""
+            SELECT status, COUNT(*) as count 
+            FROM media_items 
+            GROUP BY status
+        """)
+        status_counts = {row['status']: row['count'] for row in c.fetchall()}
+        stats['pending'] = status_counts.get('PENDING', 0)
+        stats['downloading'] = status_counts.get('DOWNLOADING', 0)
+        stats['completed'] = status_counts.get('COMPLETED', 0)
+        stats['failed'] = status_counts.get('NOT_FOUND', 0)
+        stats['total'] = sum(status_counts.values())
+        
+        # Count by media type
+        c.execute("""
+            SELECT media_type, COUNT(*) as count 
+            FROM media_items 
+            GROUP BY media_type
+        """)
+        type_counts = {row['media_type']: row['count'] for row in c.fetchall()}
+        stats['movies'] = type_counts.get('movie', 0)
+        stats['episodes'] = type_counts.get('episode', 0)
+        
+        # Count tracked series
+        c.execute("SELECT COUNT(*) as count FROM tracked_series")
+        stats['series'] = c.fetchone()['count']
+        
+        # Recent items (last 10)
+        c.execute("""
+            SELECT * FROM media_items 
+            ORDER BY updated_at DESC 
+            LIMIT 10
+        """)
+        stats['recent'] = c.fetchall()
+        
+        # Failed items
+        c.execute("""
+            SELECT * FROM media_items 
+            WHERE status = 'NOT_FOUND'
+            ORDER BY updated_at DESC
+            LIMIT 5
+        """)
+        stats['failed_items'] = c.fetchall()
+        
+        conn.close()
+        return stats
+
     def update_status(self, db_id, status, magnet=None, hash=None, error=None, symlink_path=None, is_anime=None):
         conn = self.get_connection()
         c = conn.cursor()
