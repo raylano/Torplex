@@ -4,29 +4,34 @@ from src.config import config
 class QualityManager:
     def __init__(self):
         self.profile = config.get().quality_profile.lower()
+        self.allow_4k = config.get().allow_4k
 
     def filter_items(self, items, is_anime=False):
         """
         Filters a list of Prowlarr/Indexer items based on quality profile.
         Items are expected to be dicts with 'title', 'size', 'indexer', etc.
         """
-        # Simple heuristic: Look for resolution in title
-        # 4k/2160p
-        # 1080p
-        # 720p
-
         ranked_items = []
         for item in items:
             title = item.get('title', '').lower()
             score = 0
 
             # Resolution scoring
-            if '2160p' in title or '4k' in title:
-                score += 100 if '2160p' in self.profile or '4k' in self.profile else 10
-            elif '1080p' in title:
-                score += 100 if '1080p' in self.profile else 50
+            is_4k = '2160p' in title or '4k' in title or 'uhd' in title
+
+            if is_4k:
+                if not self.allow_4k:
+                    # Skip 4K entirely if not allowed
+                    continue
+                else:
+                    score += 100
+
+            if '1080p' in title:
+                score += 100 # High priority for 1080p
             elif '720p' in title:
-                score += 20
+                score += 50
+            elif '480p' in title or 'sd' in title:
+                score += 10 # Low priority
 
             # Codec scoring (prefer x265/HEVC for efficiency, or x264 for compat)
             if 'x265' in title or 'hevc' in title:
@@ -43,8 +48,6 @@ class QualityManager:
                     score += 200 # High priority
                 elif 'dub' in title or 'dubbed' in title:
                     score += 150
-                # Penalize raw if we want dubbed? Usually users want subs if not dubbed.
-                # But request is specifically "dual-audio preffered or dubbed".
 
             ranked_items.append((score, item))
 

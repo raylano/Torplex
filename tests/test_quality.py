@@ -4,10 +4,10 @@ from src.logic.quality import QualityManager
 class TestQualityManager(unittest.TestCase):
     def setUp(self):
         self.qm = QualityManager()
-        # Mock profile
         self.qm.profile = "1080p"
+        self.qm.allow_4k = False # Explicitly forbid 4K
 
-    def test_filter_items(self):
+    def test_filter_no_4k(self):
         items = [
             {'title': 'Movie.Title.2023.1080p.BluRay.x264', 'magnetUrl': 'magnet:?xt=urn:btih:ABC'},
             {'title': 'Movie.Title.2023.2160p.WEB-DL.x265.HDR', 'magnetUrl': 'magnet:?xt=urn:btih:DEF'},
@@ -15,7 +15,8 @@ class TestQualityManager(unittest.TestCase):
         ]
 
         filtered = self.qm.filter_items(items)
-        # Expect 1080p first (score 100+), then 2160p (score 10), then 720p
+        # Should NOT contain the 2160p item
+        self.assertEqual(len(filtered), 2)
         self.assertEqual(filtered[0]['title'], 'Movie.Title.2023.1080p.BluRay.x264')
 
     def test_filter_anime(self):

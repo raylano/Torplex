@@ -15,7 +15,8 @@ class Settings(BaseModel):
 
     # Advanced settings
     scan_interval: int = 15  # minutes
-    quality_profile: str = "1080p" # Default target
+    quality_profile: str = "1080p" # Default target. If '1080p', avoids 4K.
+    allow_4k: bool = False # Specific override
 
 class ConfigManager:
     def __init__(self):
@@ -28,10 +29,9 @@ class ConfigManager:
             with open(self.config_path, "r") as f:
                 data = yaml.safe_load(f)
                 if data:
-                    # Update settings with file data, keeping defaults if missing
                     self.settings = self.settings.copy(update=data)
         else:
-            self.save() # Create default file if missing
+            self.save()
 
     def save(self):
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
