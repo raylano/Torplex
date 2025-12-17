@@ -1,4 +1,6 @@
 import requests
+import hashlib
+import bencodepy
 from src.config import config
 
 class ProwlarrClient:
@@ -6,7 +8,7 @@ class ProwlarrClient:
         pass
 
     def search(self, query, category=None):
-        # Prowlarr internal search API
+        """Search Prowlarr for torrents"""
         base_url = config.get().prowlarr_url
         api_key = config.get().prowlarr_api_key
 
@@ -27,11 +29,70 @@ class ProwlarrClient:
             resp.raise_for_status()
             results = resp.json()
             print(f"Prowlarr returned {len(results)} results for '{query}'")
-            if results and len(results) > 0:
-                # Debug: show first result structure
-                print(f"First result keys: {list(results[0].keys())[:10]}")
             return results
         except Exception as e:
             print(f"Prowlarr Error: {e}")
             return []
 
+    def download_torrent(self, download_url):
+        """
+        Download .torrent file via Prowlarr's proxy and extract info_hash.
+        Returns tuple: (info_hash, name) or (None, None) on failure.
+        """
+        try:
+            print(f"Downloading torrent from Prowlarr...")
+            resp = requests.get(download_url, timeout=30)
+            resp.raise_for_status()
+            
+            # Parse the .torrent file (bencoded data)
+            torrent_data = bencodepy.decode(resp.content)
+            
+            # Extract info dictionary
+            info = torrent_data[b'info']
+            
+            # Calculate info_hash (SHA1 of bencoded info dict)
+            info_encoded = bencodepy.encode(info)
+            info_hash = hashlib.sha1(info_encoded).hexdigest().upper()
+            
+            # Get torrent name
+            name = info.get(b'name', b'Unknown').decode('utf-8', errors='ignore')
+            
+            print(f"Extracted hash: {info_hash} for: {name}")
+            return info_hash, name
+            
+        except Exception as e:
+            print(f"Torrent download/parse error: {e}")
+            return None, None
+    
+    def get_magnet_from_result(self, result):
+        """
+        Try to get a magnet link from a search result.
+        If no direct magnet, downloads .torrent and constructs one.
+        Returns: (magnet_link, info_hash) or (None, None)
+        """
+        # First try direct magnet/download URLs
+        magnet = result.get('magnetUrl')
+        if magnet and magnet.startswith('magnet:'):
+            # Extract hash from magnet
+            import re
+            match = re.search(r'btih:([a-fA-F0-9]{40})', magnet)
+            if match:
+                return magnet, match.group(1).upper()
+        
+        # No direct magnet - try to download .torrent
+        download_url = result.get('downloadUrl')
+        if not download_url:
+            return None, None
+        
+        info_hash, name = self.download_torrent(download_url)
+        if not info_hash:
+            return None, None
+        
+        # Construct magnet link
+        title = result.get('title') or name or 'Unknown'
+        # URL encode the title for the magnet link
+        import urllib.parse
+        encoded_title = urllib.parse.quote(title)
+        magnet = f"magnet:?xt=urn:btih:{info_hash}&dn={encoded_title}"
+        
+        return magnet, info_hash

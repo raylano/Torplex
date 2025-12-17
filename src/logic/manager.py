@@ -174,43 +174,26 @@ class Manager:
                 db.update_status(row_id, "NOT_FOUND")
                 continue
 
-            top_candidates = filtered[:5]
+            top_candidates = filtered[:3]  # Limit to 3 to avoid too many torrent downloads
             hashes = []
             magnet_map = {}
             
-            # Debug: show first candidate's magnet-related fields
-            if top_candidates:
-                first = top_candidates[0]
-                print(f"DEBUG First result: magnetUrl={first.get('magnetUrl')}, downloadUrl={first.get('downloadUrl')}, guid={first.get('guid')[:50] if first.get('guid') else None}, infoHash={first.get('infoHash')}")
+            print(f"Processing {len(top_candidates)} candidates for {query}...")
 
-            for res in top_candidates:
-                magnet = res.get('magnetUrl') or res.get('downloadUrl')
-                
-                # If no magnetUrl, try to construct from info_hash (for TPB and similar)
-                if not magnet or not magnet.startswith('magnet:'):
-                    info_hash = res.get('info_hash') or res.get('infoHash') or res.get('guid')
-                    if info_hash:
-                        # Extract hash if it's a URL or construct magnet
-                        if info_hash.startswith('magnet:'):
-                            magnet = info_hash
-                        else:
-                            # Clean the hash (remove any non-hex chars)
-                            clean_hash = ''.join(c for c in info_hash if c in '0123456789ABCDEFabcdef')
-                            if len(clean_hash) == 40:  # Valid info_hash length
-                                name = res.get('title') or res.get('name') or 'Unknown'
-                                magnet = f"magnet:?xt=urn:btih:{clean_hash}&dn={name}"
-                
-                if magnet and magnet.startswith('magnet:'):
-                    h = self.quality.extract_hash(magnet)
-                    if h:
-                        hashes.append(h)
-                        magnet_map[h] = magnet
+            for i, res in enumerate(top_candidates):
+                print(f"  Candidate {i+1}: {res.get('title', 'Unknown')[:60]}...")
+                magnet, info_hash = self.prowlarr.get_magnet_from_result(res)
+                if magnet and info_hash:
+                    hashes.append(info_hash)
+                    magnet_map[info_hash] = magnet
+                    break  # Got one, that's enough for now
 
             if not hashes:
-                print(f"No magnet links found for {query}")
+                print(f"No magnet links could be extracted for {query}")
                 db.update_status(row_id, "NOT_FOUND")
                 continue
 
+            # Check if cached on Torbox
             cache_result = self.torbox.check_cached(hashes)
             found_hash = None
 
@@ -230,24 +213,21 @@ class Manager:
                         found_hash = h
                         break
 
+            # Use first hash regardless of cache status
+            use_hash = found_hash if found_hash else hashes[0]
+            magnet = magnet_map[use_hash]
+            
             if found_hash:
-                print(f"Found cached: {query}")
-                magnet = magnet_map[found_hash]
-                resp = self.torbox.add_magnet(magnet)
-                if resp and resp.get('success'):
-                    db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=found_hash)
-                else:
-                    db.update_status(row_id, "NOT_FOUND", error="Failed to add to Torbox")
+                print(f"Found cached on Torbox: {query}")
             else:
-                # Not cached - add first available magnet anyway, it will download
-                print(f"Not cached, adding first result: {query}")
-                first_hash = hashes[0]
-                magnet = magnet_map[first_hash]
-                resp = self.torbox.add_magnet(magnet)
-                if resp and resp.get('success'):
-                    db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=first_hash)
-                else:
-                    db.update_status(row_id, "NOT_FOUND", error="Failed to add to Torbox")
+                print(f"Not cached, adding anyway: {query}")
+            
+            resp = self.torbox.add_magnet(magnet)
+            if resp and resp.get('success'):
+                db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=use_hash)
+                print(f"Successfully added to Torbox: {query}")
+            else:
+                db.update_status(row_id, "NOT_FOUND", error="Failed to add to Torbox")
 
     def retry_failed_downloads(self):
         count = db.retry_failed(hours=12)
