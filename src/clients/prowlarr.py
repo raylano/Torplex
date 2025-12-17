@@ -25,7 +25,8 @@ class ProwlarrClient:
         params = {
             "query": query,
             "apikey": api_key,
-            "type": "search"
+            "type": "search",
+            "limit": 100
         }
 
         try:
