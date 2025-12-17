@@ -6,19 +6,12 @@ class ProwlarrClient:
         pass
 
     def search(self, query, category=None):
-        # Torznab search via Prowlarr
-        # Endpoint: http://prowlarr:9696/api/v1/search?query={query}&apikey={key}
-        # Actually Prowlarr provides torznab endpoints for apps, but also has an internal API.
-        # It's easier to use the Prowlarr internal API to search all indexers, OR use the aggregate Torznab endpoint.
-        # Prowlarr aggregate endpoint: /prowlarr/api/v1/search?query=... matches internal search.
-        # Torznab aggregate is usually /prowlarr/[id]/api?t=search...
-
-        # Let's use the internal search API which is more powerful for "manual" searching logic.
-
+        # Prowlarr internal search API
         base_url = config.get().prowlarr_url
         api_key = config.get().prowlarr_api_key
 
         if not api_key:
+            print("Prowlarr Error: No API key configured")
             return []
 
         url = f"{base_url}/api/v1/search"
@@ -32,7 +25,13 @@ class ProwlarrClient:
         try:
             resp = requests.get(url, params=params)
             resp.raise_for_status()
-            return resp.json()
+            results = resp.json()
+            print(f"Prowlarr returned {len(results)} results for '{query}'")
+            if results and len(results) > 0:
+                # Debug: show first result structure
+                print(f"First result keys: {list(results[0].keys())[:10]}")
+            return results
         except Exception as e:
             print(f"Prowlarr Error: {e}")
             return []
+

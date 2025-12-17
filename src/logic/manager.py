@@ -180,6 +180,21 @@ class Manager:
 
             for res in top_candidates:
                 magnet = res.get('magnetUrl') or res.get('downloadUrl')
+                
+                # If no magnetUrl, try to construct from info_hash (for TPB and similar)
+                if not magnet or not magnet.startswith('magnet:'):
+                    info_hash = res.get('info_hash') or res.get('infoHash') or res.get('guid')
+                    if info_hash:
+                        # Extract hash if it's a URL or construct magnet
+                        if info_hash.startswith('magnet:'):
+                            magnet = info_hash
+                        else:
+                            # Clean the hash (remove any non-hex chars)
+                            clean_hash = ''.join(c for c in info_hash if c in '0123456789ABCDEFabcdef')
+                            if len(clean_hash) == 40:  # Valid info_hash length
+                                name = res.get('title') or res.get('name') or 'Unknown'
+                                magnet = f"magnet:?xt=urn:btih:{clean_hash}&dn={name}"
+                
                 if magnet and magnet.startswith('magnet:'):
                     h = self.quality.extract_hash(magnet)
                     if h:
@@ -187,6 +202,7 @@ class Manager:
                         magnet_map[h] = magnet
 
             if not hashes:
+                print(f"No magnet links found for {query}")
                 db.update_status(row_id, "NOT_FOUND")
                 continue
 
