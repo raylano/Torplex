@@ -1,0 +1,66 @@
+services:
+  # The Brain: Our Python Application
+  app:
+    build: .
+    container_name: torbox_plex_manager
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+      - ./data:/data
+      # Mount the rclone share so the app can see the files
+      - /mnt/torbox:/mnt/torbox:rshared
+      # Mount the media folder where symlinks will be created
+      - ./media:/mnt/media
+    environment:
+      - CONFIG_PATH=/config
+      - DATA_PATH=/data
+      - MOUNT_PATH=/mnt/torbox
+      - SYMLINK_PATH=/mnt/media
+      - PUID=1000
+      - PGID=1000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - rclone
+
+  # Rclone: Mounts Torbox WebDAV
+  rclone:
+    image: rclone/rclone:latest
+    container_name: rclone_mount
+    restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - ./config/rclone:/config/rclone
+      - /mnt/torbox:/mnt/torbox:rshared
+    # The command mounts the remote 'torbox' to /mnt/torbox.
+    # Users must configure rclone.conf in ./config/rclone/rclone.conf first
+    command: "mount torbox: /mnt/torbox --allow-other --dir-cache-time 10s --vfs-cache-mode full"
+
+  # Prowlarr: Indexer Manager
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "9696:9696"
+    restart: unless-stopped
+
+  # Flaresolverr: Often needed for Prowlarr to bypass Cloudflare
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    environment:
+      - LOG_LEVEL=info
+    ports:
+      - "8191:8191"
+    restart: unless-stopped

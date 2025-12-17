@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+requests
+apscheduler
+jinja2
+python-dotenv
+tmdbv3api
+aiofiles
+httpx
+pyyaml
+loguru
