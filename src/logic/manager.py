@@ -8,6 +8,7 @@ from src.clients.tmdb import TMDBClient
 from src.clients.plex import PlexClient
 from src.clients.prowlarr import ProwlarrClient
 from src.logic.quality import QualityManager
+from src.logic.scraper import get_scraper, MultiScraper
 
 class Manager:
     def __init__(self):
@@ -16,6 +17,7 @@ class Manager:
         self.plex = PlexClient()
         self.prowlarr = ProwlarrClient()
         self.quality = QualityManager()
+        self.scraper = get_scraper()
 
     def _check_anime_status(self, tmdb_id, media_type):
         """
@@ -126,9 +128,24 @@ class Manager:
                             is_anime=is_anime
                         )
 
+    def _get_imdb_id(self, tmdb_id: str, media_type: str) -> str:
+        """Get IMDB ID from TMDB ID."""
+        try:
+            if media_type == 'movie':
+                details = self.tmdb.get_movie_details(tmdb_id)
+            else:
+                details = self.tmdb.get_tv_details(tmdb_id)
+            
+            if details:
+                return getattr(details, 'imdb_id', None) or getattr(details, 'external_ids', {}).get('imdb_id')
+        except:
+            pass
+        return None
+
     def process_pending(self):
-        """Searches for pending items."""
+        """Searches for pending items using multi-scraper (Torrentio -> Prowlarr)."""
         items = db.get_pending_items()
+        
         for item in items:
             row_id = item['id']
             title = item['title']
@@ -139,82 +156,89 @@ class Manager:
             parent_id = item['parent_tmdb_id']
             tmdb_id = item['tmdb_id']
             is_anime_db = item['is_anime']
-
-            query = ""
+            
+            # Get or lookup IMDB ID for better scraping
+            imdb_id = item.get('imdb_id') or item.get('parent_imdb_id')
+            
             is_anime = bool(is_anime_db)
 
             if media_type == 'movie':
-                query = f"{title} {year}"
-                # Re-check if not set?
+                # Re-check anime status
                 if not is_anime_db:
                     check = self._check_anime_status(tmdb_id, 'movie')
                     if check:
                         is_anime = True
-                        db.update_status(row_id, "PENDING", is_anime=1) # Update DB
+                        db.update_status(row_id, "PENDING", is_anime=1)
+                
+                # Lookup IMDB ID if not present
+                if not imdb_id:
+                    imdb_id = self._get_imdb_id(tmdb_id, 'movie')
+                    print(f"  IMDB lookup: {tmdb_id} -> {imdb_id}")
+                
+                print(f"\n[Scrape] {title} ({year}) - IMDB: {imdb_id or 'N/A'}")
+                db.update_status(row_id, "SEARCHING")
+                
+                # Use multi-scraper
+                scraped = self.scraper.scrape_movie(title, year, imdb_id)
             else:
-                query = f"{title} S{season:02d}E{episode:02d}"
+                # Episode
                 if not is_anime_db and parent_id:
-                     check = self._check_anime_status(parent_id, 'tv')
-                     if check:
+                    check = self._check_anime_status(parent_id, 'tv')
+                    if check:
                         is_anime = True
                         db.update_status(row_id, "PENDING", is_anime=1)
-
-            print(f"Searching for {query} (Anime={is_anime})...")
-            db.update_status(row_id, "SEARCHING")
-
-            search_results = self.prowlarr.search(query)
-
-            if not search_results:
-                print(f"No results for {query}")
-                db.update_status(row_id, "NOT_FOUND")
-                continue
-
-            filtered = self.quality.filter_items(search_results, is_anime=is_anime)
-            if not filtered:
-                print(f"No suitable results for {query}")
-                db.update_status(row_id, "NOT_FOUND")
-                continue
-
-            top_candidates = filtered[:5]  # Check up to 5 for cache
-            hashes = []
-            magnet_map = {}
+                
+                # Lookup IMDB ID for parent series
+                if not imdb_id and parent_id:
+                    imdb_id = self._get_imdb_id(parent_id, 'tv')
+                    print(f"  IMDB lookup: {parent_id} -> {imdb_id}")
+                
+                print(f"\n[Scrape] {title} S{season:02d}E{episode:02d} - IMDB: {imdb_id or 'N/A'}")
+                db.update_status(row_id, "SEARCHING")
+                
+                # Use multi-scraper
+                scraped = self.scraper.scrape_episode(title, season, episode, year, imdb_id, is_anime)
             
-            print(f"Processing {len(top_candidates)} candidates for {query}...")
-
-            # Extract magnets for multiple candidates (so we can check cache)
-            for i, res in enumerate(top_candidates):
-                print(f"  Candidate {i+1}: {res.get('title', 'Unknown')[:60]}...")
-                magnet, info_hash = self.prowlarr.get_magnet_from_result(res)
-                if magnet and info_hash:
-                    hashes.append(info_hash)
-                    magnet_map[info_hash] = magnet
-                    # Don't break - collect multiple for cache check
-
-            if not hashes:
-                print(f"No magnet links could be extracted for {query}")
+            if not scraped:
+                print(f"  ✗ No results found")
                 db.update_status(row_id, "NOT_FOUND")
                 continue
-
-            # Check cache for ALL collected hashes
-            print(f"Checking cache for {len(hashes)} hashes...")
+            
+            # Take top candidates for cache check
+            top_candidates = scraped[:10]
+            hashes = [s.info_hash for s in top_candidates]
+            
+            print(f"  Checking cache for {len(hashes)} hashes...")
             cache_result = self.debrid.check_cached(hashes)
             
-            # New interface returns {hash: bool} directly
-            cached_hashes = [h for h in hashes if cache_result.get(h.lower(), False)]
-
-            # PRIORITY: Use cached hash if available, otherwise first (highest seeded)
-            if cached_hashes:
-                use_hash = cached_hashes[0]  # First cached
-                print(f"✓ Found {len(cached_hashes)} cached! Using: {use_hash[:16]}...")
-            else:
-                use_hash = hashes[0]  # First non-cached (highest seeded)
-                print(f"✗ No cached torrents, using highest seeded: {use_hash[:16]}...")
+            # Find cached torrents
+            cached = [s for s in top_candidates if cache_result.get(s.info_hash.lower(), False)]
             
-            magnet = magnet_map[use_hash]
+            # Select best option
+            if cached:
+                selected = cached[0]  # Best cached (already ranked)
+                print(f"  ✓ Using cached: {selected.raw_title[:60]}...")
+            else:
+                selected = top_candidates[0]  # Best overall
+                print(f"  ✗ No cache. Using best: {selected.raw_title[:60]}...")
+            
+            # Build magnet link if needed
+            if selected.magnet_link:
+                magnet = selected.magnet_link
+            else:
+                # Build from hash
+                magnet = f"magnet:?xt=urn:btih:{selected.info_hash}"
+            
+            # Add to debrid
             resp = self.debrid.add_magnet(magnet)
             if resp and resp.get('success'):
-                db.update_status(row_id, "DOWNLOADING", magnet=magnet, hash=use_hash)
-                print(f"Successfully added to {self.debrid.name}: {query}")
+                db.update_status(
+                    row_id, 
+                    "DOWNLOADING", 
+                    magnet=magnet, 
+                    hash=selected.info_hash
+                )
+                print(f"  ✓ Added to {self.debrid.name}")
             else:
                 db.update_status(row_id, "NOT_FOUND", error=f"Failed to add to {self.debrid.name}")
 

@@ -7,6 +7,7 @@ class Database:
     def __init__(self):
         self.db_path = Path(os.getenv("DATA_PATH", "./data")) / "app.db"
         self.init_db()
+        self.migrate_db()
 
     def get_connection(self):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -23,6 +24,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS tracked_series (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tmdb_id TEXT UNIQUE,
+                imdb_id TEXT,
                 title TEXT,
                 status TEXT, -- 'Returning Series', 'Ended', etc.
                 last_scan TIMESTAMP,
@@ -31,12 +33,13 @@ class Database:
         ''')
 
         # Media Items (Movies OR Episodes)
-        # Added is_anime column
         c.execute('''
             CREATE TABLE IF NOT EXISTS media_items (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tmdb_id TEXT,
+                imdb_id TEXT,
                 parent_tmdb_id TEXT,
+                parent_imdb_id TEXT,
                 title TEXT,
                 media_type TEXT, -- 'movie' or 'episode'
                 year INTEGER,
@@ -46,8 +49,12 @@ class Database:
                 status TEXT DEFAULT 'PENDING',
                 magnet_link TEXT,
                 torbox_hash TEXT,
+                debrid_file_id TEXT,
+                debrid_link TEXT,
                 symlink_path TEXT,
                 is_anime INTEGER DEFAULT 0, -- 0 = False, 1 = True
+                scrape_source TEXT, -- 'torrentio' or 'prowlarr'
+                quality TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 error_message TEXT,
@@ -56,6 +63,47 @@ class Database:
             )
         ''')
 
+        conn.commit()
+        conn.close()
+
+    def migrate_db(self):
+        """Add new columns to existing database if they don't exist."""
+        conn = self.get_connection()
+        c = conn.cursor()
+        
+        # Get existing columns
+        c.execute("PRAGMA table_info(media_items)")
+        existing_columns = {row['name'] for row in c.fetchall()}
+        
+        # New columns to add
+        new_columns = [
+            ("imdb_id", "TEXT"),
+            ("parent_imdb_id", "TEXT"),
+            ("debrid_file_id", "TEXT"),
+            ("debrid_link", "TEXT"),
+            ("scrape_source", "TEXT"),
+            ("quality", "TEXT"),
+        ]
+        
+        for col_name, col_type in new_columns:
+            if col_name not in existing_columns:
+                try:
+                    c.execute(f"ALTER TABLE media_items ADD COLUMN {col_name} {col_type}")
+                    print(f"[DB] Added column: {col_name}")
+                except sqlite3.OperationalError:
+                    pass
+        
+        # Also migrate tracked_series
+        c.execute("PRAGMA table_info(tracked_series)")
+        series_columns = {row['name'] for row in c.fetchall()}
+        
+        if "imdb_id" not in series_columns:
+            try:
+                c.execute("ALTER TABLE tracked_series ADD COLUMN imdb_id TEXT")
+                print("[DB] Added imdb_id to tracked_series")
+            except:
+                pass
+        
         conn.commit()
         conn.close()
 
