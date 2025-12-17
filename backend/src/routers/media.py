@@ -1,0 +1,277 @@
+"""
+Media Library Router
+CRUD operations for media items
+"""
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import select, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
+
+from src.database import get_db
+from src.models import MediaItem, MediaState, MediaType
+
+router = APIRouter()
+
+
+# Pydantic schemas
+class MediaItemResponse(BaseModel):
+    id: int
+    imdb_id: Optional[str] = None
+    tmdb_id: Optional[int] = None
+    title: str
+    original_title: Optional[str] = None
+    year: Optional[int] = None
+    type: str
+    state: str
+    is_anime: bool
+    poster_path: Optional[str] = None
+    backdrop_path: Optional[str] = None
+    overview: Optional[str] = None
+    genres: Optional[List[str]] = None
+    vote_average: Optional[float] = None
+    number_of_seasons: Optional[int] = None
+    number_of_episodes: Optional[int] = None
+    status: Optional[str] = None
+    file_path: Optional[str] = None
+    symlink_path: Optional[str] = None
+    last_error: Optional[str] = None
+    retry_count: int
+    created_at: datetime
+    updated_at: datetime
+    completed_at: Optional[datetime] = None
+    
+    # Computed fields
+    poster_url: Optional[str] = None
+    backdrop_url: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class MediaItemCreate(BaseModel):
+    title: str
+    year: Optional[int] = None
+    type: str = "movie"
+    imdb_id: Optional[str] = None
+    tmdb_id: Optional[int] = None
+    is_anime: bool = False
+
+
+class MediaItemUpdate(BaseModel):
+    state: Optional[str] = None
+    is_anime: Optional[bool] = None
+
+
+class PaginatedResponse(BaseModel):
+    items: List[MediaItemResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+def serialize_media_item(item: MediaItem) -> dict:
+    """Convert MediaItem to response dict with computed fields"""
+    data = {
+        "id": item.id,
+        "imdb_id": item.imdb_id,
+        "tmdb_id": item.tmdb_id,
+        "title": item.title,
+        "original_title": item.original_title,
+        "year": item.year,
+        "type": item.type.value if isinstance(item.type, MediaType) else item.type,
+        "state": item.state.value if isinstance(item.state, MediaState) else item.state,
+        "is_anime": item.is_anime,
+        "poster_path": item.poster_path,
+        "backdrop_path": item.backdrop_path,
+        "overview": item.overview,
+        "genres": item.genres,
+        "vote_average": item.vote_average,
+        "number_of_seasons": item.number_of_seasons,
+        "number_of_episodes": item.number_of_episodes,
+        "status": item.status,
+        "file_path": item.file_path,
+        "symlink_path": item.symlink_path,
+        "last_error": item.last_error,
+        "retry_count": item.retry_count,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+        "completed_at": item.completed_at,
+        "poster_url": item.poster_url,
+        "backdrop_url": item.backdrop_url,
+    }
+    return data
+
+
+@router.get("/library", response_model=PaginatedResponse)
+async def get_library(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    type: Optional[str] = None,
+    state: Optional[str] = None,
+    is_anime: Optional[bool] = None,
+    search: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get paginated library with filters"""
+    query = select(MediaItem)
+    
+    # Apply filters
+    if type:
+        query = query.where(MediaItem.type == type)
+    
+    if state:
+        query = query.where(MediaItem.state == state)
+    
+    if is_anime is not None:
+        query = query.where(MediaItem.is_anime == is_anime)
+    
+    if search:
+        search_term = f"%{search}%"
+        query = query.where(
+            or_(
+                MediaItem.title.ilike(search_term),
+                MediaItem.original_title.ilike(search_term),
+            )
+        )
+    
+    # Get total count
+    from sqlalchemy import func
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar() or 0
+    
+    # Apply pagination
+    offset = (page - 1) * page_size
+    query = query.order_by(MediaItem.updated_at.desc()).offset(offset).limit(page_size)
+    
+    result = await db.execute(query)
+    items = result.scalars().all()
+    
+    return {
+        "items": [serialize_media_item(item) for item in items],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
+@router.get("/library/{item_id}", response_model=MediaItemResponse)
+async def get_media_item(item_id: int, db: AsyncSession = Depends(get_db)):
+    """Get a single media item by ID"""
+    result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    
+    return serialize_media_item(item)
+
+
+@router.post("/library", response_model=MediaItemResponse)
+async def create_media_item(data: MediaItemCreate, db: AsyncSession = Depends(get_db)):
+    """Create a new media item (manual request)"""
+    # Determine media type
+    type_map = {
+        "movie": MediaType.MOVIE,
+        "show": MediaType.SHOW,
+        "anime_movie": MediaType.ANIME_MOVIE,
+        "anime_show": MediaType.ANIME_SHOW,
+    }
+    media_type = type_map.get(data.type, MediaType.MOVIE)
+    
+    # Check for anime override
+    if data.is_anime:
+        if media_type == MediaType.MOVIE:
+            media_type = MediaType.ANIME_MOVIE
+        elif media_type == MediaType.SHOW:
+            media_type = MediaType.ANIME_SHOW
+    
+    item = MediaItem(
+        title=data.title,
+        year=data.year,
+        type=media_type,
+        imdb_id=data.imdb_id,
+        tmdb_id=data.tmdb_id,
+        is_anime=data.is_anime,
+        state=MediaState.REQUESTED,
+    )
+    
+    db.add(item)
+    await db.commit()
+    await db.refresh(item)
+    
+    return serialize_media_item(item)
+
+
+@router.patch("/library/{item_id}", response_model=MediaItemResponse)
+async def update_media_item(
+    item_id: int,
+    data: MediaItemUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update a media item"""
+    result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    
+    if data.state:
+        try:
+            item.state = MediaState(data.state)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid state: {data.state}")
+    
+    if data.is_anime is not None:
+        item.is_anime = data.is_anime
+        # Update type if needed
+        if data.is_anime:
+            if item.type == MediaType.MOVIE:
+                item.type = MediaType.ANIME_MOVIE
+            elif item.type == MediaType.SHOW:
+                item.type = MediaType.ANIME_SHOW
+    
+    await db.commit()
+    await db.refresh(item)
+    
+    return serialize_media_item(item)
+
+
+@router.delete("/library/{item_id}")
+async def delete_media_item(item_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a media item"""
+    result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    
+    # Remove symlink if exists
+    if item.symlink_path:
+        from pathlib import Path
+        from src.services.filesystem import symlink_service
+        symlink_service.remove_symlink(Path(item.symlink_path))
+    
+    await db.delete(item)
+    await db.commit()
+    
+    return {"message": "Deleted", "id": item_id}
+
+
+@router.post("/library/{item_id}/retry")
+async def retry_media_item(item_id: int, db: AsyncSession = Depends(get_db)):
+    """Retry a failed media item"""
+    result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    
+    item.state = MediaState.REQUESTED
+    item.last_error = None
+    await db.commit()
+    
+    return {"message": "Retry queued", "id": item_id}

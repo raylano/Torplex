@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 15, 23, 42;
+  --background-end-rgb: 2, 6, 23;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--background-start-rgb)),
+    rgb(var(--background-end-rgb))
+  );
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Glass morphism utility */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-hover:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #0ea5e9 0%, #d946ef 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Status badges */
+.status-requested { @apply bg-blue-500/20 text-blue-400 border-blue-500/30; }
+.status-indexed { @apply bg-cyan-500/20 text-cyan-400 border-cyan-500/30; }
+.status-scraped { @apply bg-purple-500/20 text-purple-400 border-purple-500/30; }
+.status-downloading { @apply bg-yellow-500/20 text-yellow-400 border-yellow-500/30; }
+.status-downloaded { @apply bg-orange-500/20 text-orange-400 border-orange-500/30; }
+.status-symlinked { @apply bg-teal-500/20 text-teal-400 border-teal-500/30; }
+.status-completed { @apply bg-green-500/20 text-green-400 border-green-500/30; }
+.status-failed { @apply bg-red-500/20 text-red-400 border-red-500/30; }
+.status-paused { @apply bg-gray-500/20 text-gray-400 border-gray-500/30; }

@@ -1,0 +1,46 @@
+zurg: v1
+
+# Real-Debrid Token
+token: "${REAL_DEBRID_TOKEN}"
+
+# Server Configuration
+host: "[::]"
+port: 9999
+concurrent_workers: 8
+check_for_changes_every_secs: 15
+
+# Naming Options
+retain_rd_torrent_name: false
+retain_folder_name_extension: false
+ignore_renames: true
+
+# Directory Structure with Priority-Based Filtering
+directories:
+  # Anime Detection (highest priority)
+  # Matches CRC32 hashes like [ABCD1234] common in anime releases
+  anime:
+    group: media
+    group_order: 10
+    filters:
+      - regex: /\[([A-Fa-f0-9]{8})\]/
+      - any_file_inside_regex: /\[([A-Fa-f0-9]{8})\]/
+      # Also match common anime release groups
+      - regex: /\[(SubsPlease|Erai-raws|ASW|Judas|Ember|EMBER)\]/i
+      - any_file_inside_regex: /\[(SubsPlease|Erai-raws|ASW|Judas|Ember|EMBER)\]/i
+
+  # TV Shows (second priority)
+  # Matches S01E01, 1x01, etc. patterns
+  shows:
+    group: media
+    group_order: 20
+    filters:
+      - has_episodes: true
+
+  # Movies (lowest priority, catch-all)
+  # Only shows the biggest file to avoid samples/extras
+  movies:
+    group: media
+    group_order: 30
+    only_show_the_biggest_file: true
+    filters:
+      - regex: /.*/
