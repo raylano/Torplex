@@ -7,13 +7,9 @@ from typing import Optional, Dict, List, Any
 from dataclasses import dataclass
 from enum import Enum
 
-try:
-    from RTN import RTN, Torrent, DefaultRanking
-    from RTN.models import ParsedData
-    RTN_AVAILABLE = True
-except ImportError:
-    RTN_AVAILABLE = False
-    print("[RTN] rank-torrent-name not installed, using fallback parser")
+# Note: RTN library has complex initialization requirements
+# We use our own fallback parser which is simpler and more reliable
+RTN_AVAILABLE = False
 
 
 class Quality(Enum):
@@ -48,34 +44,17 @@ class ParsedTorrent:
 
 class TorrentParser:
     """
-    Intelligent torrent parser using RTN library with fallback.
-    Handles quality detection, season/episode extraction, and ranking.
+    Intelligent torrent parser with quality detection, season/episode extraction, and ranking.
+    Uses built-in parsing for reliability.
     """
     
     def __init__(self, quality_profile: str = "hd", allow_4k: bool = False):
         self.quality_profile = quality_profile
         self.allow_4k = allow_4k
-        
-        if RTN_AVAILABLE:
-            # Configure RTN with quality preferences
-            self.rtn = RTN(
-                settings={
-                    "require": [],
-                    "exclude": [],
-                    "preferred": ["bluray", "remux"] if quality_profile == "uhd" else ["bluray", "web-dl"],
-                },
-                ranking_model=DefaultRanking()
-            )
-        else:
-            self.rtn = None
     
     def parse(self, raw_title: str, info_hash: str) -> ParsedTorrent:
         """Parse a torrent title and extract metadata."""
-        
-        if self.rtn and RTN_AVAILABLE:
-            return self._parse_with_rtn(raw_title, info_hash)
-        else:
-            return self._parse_fallback(raw_title, info_hash)
+        return self._parse_fallback(raw_title, info_hash)
     
     def _parse_with_rtn(self, raw_title: str, info_hash: str) -> ParsedTorrent:
         """Parse using RTN library."""
