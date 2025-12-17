@@ -222,23 +222,35 @@ class MultiScraper:
             query = f"{title} {year}"
             search_results = self.prowlarr.search(query)
             
+            # Phase 1: Filter candidates based on title (avoid expensive magnet fetch)
+            candidates = []
             for item in search_results:
-                # Get magnet/hash
+                raw_title = item.get('title', '')
+                if not raw_title:
+                    continue
+                
+                # Speculative parse without hash
+                try:
+                    parsed = self.parser.parse(raw_title, "")
+                    if self.parser.validate_for_movie(parsed) and self.parser.filter_by_quality(parsed):
+                        candidates.append((item, parsed))
+                except Exception:
+                    continue
+            
+            # Phase 2: Fetch magnets for top candidates in parallel
+            # Sort by rank to prioritize best matches
+            candidates.sort(key=lambda x: x[1].rank, reverse=True)
+            top_candidates = [c[0] for c in candidates[:15]]
+            
+            def fetch_magnet(item):
                 magnet, info_hash = self.prowlarr.get_magnet_from_result(item)
                 if not info_hash:
-                    continue
+                    return None
                 
                 raw_title = item.get('title', '')
                 parsed = self.parser.parse(raw_title, info_hash)
                 
-                # Validate
-                if not self.parser.validate_for_movie(parsed):
-                    continue
-                
-                if not self.parser.filter_by_quality(parsed):
-                    continue
-                
-                results.append(ScrapedTorrent(
+                return ScrapedTorrent(
                     info_hash=info_hash,
                     raw_title=raw_title,
                     parsed=parsed,
@@ -246,7 +258,18 @@ class MultiScraper:
                     seeders=item.get('seeders', 0),
                     size_bytes=item.get('size', 0),
                     magnet_link=magnet
-                ))
+                )
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = [executor.submit(fetch_magnet, item) for item in top_candidates]
+                for future in as_completed(futures):
+                    try:
+                        res = future.result()
+                        if res:
+                            results.append(res)
+                    except Exception as e:
+                        print(f"[Scraper] Error fetching magnet: {e}")
+
         except Exception as e:
             print(f"[Scraper] Prowlarr movie error: {e}")
         
@@ -266,22 +289,33 @@ class MultiScraper:
             
             search_results = self.prowlarr.search(query)
             
+            # Phase 1: Filter candidates based on title
+            candidates = []
             for item in search_results:
+                raw_title = item.get('title', '')
+                if not raw_title:
+                    continue
+                
+                try:
+                    parsed = self.parser.parse(raw_title, "")
+                    if self.parser.validate_for_episode(parsed, season, episode) and self.parser.filter_by_quality(parsed):
+                        candidates.append((item, parsed))
+                except Exception:
+                    continue
+            
+            # Phase 2: Fetch magnets for top candidates in parallel
+            candidates.sort(key=lambda x: x[1].rank, reverse=True)
+            top_candidates = [c[0] for c in candidates[:15]]
+            
+            def fetch_magnet(item):
                 magnet, info_hash = self.prowlarr.get_magnet_from_result(item)
                 if not info_hash:
-                    continue
+                    return None
                 
                 raw_title = item.get('title', '')
                 parsed = self.parser.parse(raw_title, info_hash)
                 
-                # Validate for episode
-                if not self.parser.validate_for_episode(parsed, season, episode):
-                    continue
-                
-                if not self.parser.filter_by_quality(parsed):
-                    continue
-                
-                results.append(ScrapedTorrent(
+                return ScrapedTorrent(
                     info_hash=info_hash,
                     raw_title=raw_title,
                     parsed=parsed,
@@ -289,7 +323,18 @@ class MultiScraper:
                     seeders=item.get('seeders', 0),
                     size_bytes=item.get('size', 0),
                     magnet_link=magnet
-                ))
+                )
+
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = [executor.submit(fetch_magnet, item) for item in top_candidates]
+                for future in as_completed(futures):
+                    try:
+                        res = future.result()
+                        if res:
+                            results.append(res)
+                    except Exception as e:
+                        print(f"[Scraper] Error fetching magnet: {e}")
+
         except Exception as e:
             print(f"[Scraper] Prowlarr episode error: {e}")
         
