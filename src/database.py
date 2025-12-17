@@ -184,32 +184,47 @@ class Database:
         
         stats = {}
         
-        # Count by status
+        # Count movies by status
+        c.execute("SELECT COUNT(*) FROM media_items WHERE media_type = 'movie' AND status = 'COMPLETED'")
+        completed_movies = c.fetchone()[0]
+        
+        # Count fully completed series (all episodes done)
         c.execute("""
-            SELECT status, COUNT(*) as count 
-            FROM media_items 
-            GROUP BY status
+            SELECT COUNT(DISTINCT parent_tmdb_id) FROM (
+                SELECT parent_tmdb_id
+                FROM media_items 
+                WHERE media_type = 'episode' 
+                GROUP BY parent_tmdb_id
+                HAVING COUNT(*) = SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END)
+            )
         """)
-        status_counts = {row['status']: row['count'] for row in c.fetchall()}
-        stats['pending'] = status_counts.get('PENDING', 0)
-        stats['downloading'] = status_counts.get('DOWNLOADING', 0)
-        stats['completed'] = status_counts.get('COMPLETED', 0)
-        stats['failed'] = status_counts.get('NOT_FOUND', 0)
-        stats['total'] = sum(status_counts.values())
+        completed_series = c.fetchone()[0]
+        
+        stats['completed'] = completed_movies + completed_series
+        
+        # Count pending/downloading
+        c.execute("SELECT COUNT(*) FROM media_items WHERE status IN ('PENDING', 'DOWNLOADING', 'SEARCHING')")
+        stats['pending'] = c.fetchone()[0]
+        
+        c.execute("SELECT COUNT(*) FROM media_items WHERE status = 'DOWNLOADING'")
+        stats['downloading'] = c.fetchone()[0]
+        
+        c.execute("SELECT COUNT(*) FROM media_items WHERE status = 'NOT_FOUND'")
+        stats['failed'] = c.fetchone()[0]
+        
+        c.execute("SELECT COUNT(*) FROM media_items")
+        stats['total'] = c.fetchone()[0]
         
         # Count by media type
-        c.execute("""
-            SELECT media_type, COUNT(*) as count 
-            FROM media_items 
-            GROUP BY media_type
-        """)
-        type_counts = {row['media_type']: row['count'] for row in c.fetchall()}
-        stats['movies'] = type_counts.get('movie', 0)
-        stats['episodes'] = type_counts.get('episode', 0)
+        c.execute("SELECT COUNT(*) FROM media_items WHERE media_type = 'movie'")
+        stats['movies'] = c.fetchone()[0]
+        
+        c.execute("SELECT COUNT(*) FROM media_items WHERE media_type = 'episode'")
+        stats['episodes'] = c.fetchone()[0]
         
         # Count tracked series
         c.execute("SELECT COUNT(*) as count FROM tracked_series")
-        stats['series'] = c.fetchone()['count']
+        stats['series'] = c.fetchone()[0]
         
         # Recent items (last 10)
         c.execute("""

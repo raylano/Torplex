@@ -158,7 +158,11 @@ class Manager:
             is_anime_db = item['is_anime']
             
             # Get or lookup IMDB ID for better scraping
-            imdb_id = item.get('imdb_id') or item.get('parent_imdb_id')
+            # sqlite3.Row doesn't have .get(), use try/except
+            try:
+                imdb_id = item['imdb_id'] or item['parent_imdb_id']
+            except (KeyError, IndexError):
+                imdb_id = None
             
             is_anime = bool(is_anime_db)
 
