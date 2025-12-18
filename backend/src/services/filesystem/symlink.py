@@ -83,21 +83,27 @@ class SymlinkService:
     def find_by_title(self, title: str) -> Optional[Path]:
         """
         Find file by searching for title in mount.
-        Uses fuzzy matching on the first significant words.
+        Uses lenient matching - only needs 1-2 key words.
         """
         if not title:
             return None
         
-        # Extract key words from title (first 2-3 significant words)
-        words = title.lower().split()
+        # Clean title - remove special chars and make lowercase
+        import re
+        clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
+        words = clean_title.split()
+        
         # Skip common words
-        skip_words = {'the', 'a', 'an', 'and', 'of', 'in', 'on', 'at', 'to', 'for'}
-        keywords = [w for w in words if w not in skip_words][:3]
+        skip_words = {'the', 'a', 'an', 'and', 'of', 'in', 'on', 'at', 'to', 'for', 'is', 'it'}
+        keywords = [w for w in words if w not in skip_words and len(w) > 2][:2]
         
         if not keywords:
-            keywords = words[:2]
+            keywords = words[:1] if words else []
         
-        logger.debug(f"Searching mount for title keywords: {keywords}")
+        if not keywords:
+            return None
+        
+        logger.info(f"Searching mount for: {keywords}")
         
         # Search all subdirs
         for subdir in ["movies", "shows", "anime", "__all__"]:
@@ -106,10 +112,12 @@ class SymlinkService:
                 continue
             
             for item in search_path.iterdir():
-                item_name_lower = item.name.lower()
-                # Check if all keywords are in the name
-                if all(kw in item_name_lower for kw in keywords):
-                    logger.debug(f"Found match: {item}")
+                # Clean item name same way
+                item_name_clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', item.name.lower())
+                
+                # Check if ALL keywords are in the name
+                if all(kw in item_name_clean for kw in keywords):
+                    logger.info(f"Found match: {item.name}")
                     if item.is_file():
                         return item
                     elif item.is_dir():
@@ -117,7 +125,9 @@ class SymlinkService:
                         if video_files:
                             return video_files[0]
         
+        logger.warning(f"No match found for keywords: {keywords}")
         return None
+
 
     
     def _find_video_files(self, directory: Path) -> list[Path]:

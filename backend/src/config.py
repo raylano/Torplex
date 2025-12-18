@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     prowlarr_url: str = Field(default="http://prowlarr:9696", alias="PROWLARR_URL")
     prowlarr_api_key: str = Field(default="", alias="PROWLARR_API_KEY")
     
+    # Zilean (optional cache checker)
+    zilean_url: str = Field(default="", alias="ZILEAN_URL")
+    
     # Paths
     mount_path: str = Field(default="/mnt/zurg", alias="MOUNT_PATH")
     symlink_path: str = Field(default="/mnt/media", alias="SYMLINK_PATH")
