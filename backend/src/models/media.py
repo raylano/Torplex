@@ -125,8 +125,9 @@ class Episode(Base):
     state: Mapped[MediaState] = mapped_column(String(20), default=MediaState.REQUESTED, index=True)
     
     # File info
-    file_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)  # info_hash or matched file
     symlink_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    torrent_name: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)  # Torrent folder name in mount
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

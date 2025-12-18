@@ -133,7 +133,7 @@ class EpisodeProcessor:
         return MediaState.FAILED
     
     async def _download_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
-        """Add episode torrent to debrid"""
+        """Add episode torrent to debrid and store torrent info for symlink"""
         logger.info(f"Downloading: {show.title} S{episode.season_number:02d}E{episode.episode_number:02d}")
         
         info_hash = episode.file_path
@@ -142,12 +142,24 @@ class EpisodeProcessor:
             await session.commit()
             return MediaState.FAILED
         
+        # Try instant check first (Riven-style) - this also adds the torrent
+        instant = await downloader.check_instant_via_add(info_hash)
+        
+        if instant and instant.get("cached"):
+            # Store torrent name for symlink matching
+            episode.torrent_name = instant.get("filename")
+            episode.state = MediaState.DOWNLOADED
+            await session.commit()
+            logger.info(f"✅ Cached! Torrent: {episode.torrent_name[:40] if episode.torrent_name else 'N/A'}...")
+            return MediaState.DOWNLOADED
+        
+        # Not cached - add normally and wait
         provider, debrid_id = await downloader.add_torrent(info_hash)
         
         if provider and debrid_id:
             episode.state = MediaState.DOWNLOADED
             await session.commit()
-            logger.info(f"Added to {provider}: S{episode.season_number}E{episode.episode_number}")
+            logger.info(f"Added to {provider} (not cached, waiting): {debrid_id}")
             return MediaState.DOWNLOADED
         
         episode.state = MediaState.FAILED
@@ -158,14 +170,23 @@ class EpisodeProcessor:
         """Create symlink for episode"""
         logger.info(f"Symlinking: {show.title} S{episode.season_number:02d}E{episode.episode_number:02d}")
         
-        # Use the episode-specific search function (only searches shows/anime folders)
-        source_path = symlink_service.find_episode(
-            show.title,
-            episode.season_number,
-            episode.episode_number
-        )
+        source_path = None
         
-        # NO fallback to find_by_infohash - that searches movies too!
+        # First try: Use stored torrent_name for direct path construction
+        if episode.torrent_name:
+            source_path = symlink_service.find_episode_in_torrent(
+                episode.torrent_name,
+                episode.season_number,
+                episode.episode_number
+            )
+        
+        # Second try: Episode-specific search in __all__ folder
+        if not source_path:
+            source_path = symlink_service.find_episode(
+                show.title,
+                episode.season_number,
+                episode.episode_number
+            )
         
         if not source_path:
             logger.warning(f"Episode file not found in mount: {show.title} S{episode.season_number}E{episode.episode_number}")

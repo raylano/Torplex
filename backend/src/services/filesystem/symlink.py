@@ -161,6 +161,49 @@ class SymlinkService:
         logger.info(f"Found match: {best_folder.name} (score: {best_score})")
         return best_file if best_file else best_folder
     
+    def find_episode_in_torrent(self, torrent_name: str, season: int, episode: int) -> Optional[Path]:
+        """
+        Find specific episode file within a known torrent folder.
+        Uses the stored torrent_name for direct path construction.
+        """
+        import re
+        
+        if not torrent_name:
+            return None
+        
+        # Patterns to match episode numbers
+        patterns = [
+            rf's0?{season}e0?{episode}\b',       # S1E1, S01E01, S1E01, etc
+            rf'{season}x0?{episode}\b',          # 1x01
+        ]
+        
+        logger.info(f"Searching for S{season:02d}E{episode:02d} in torrent: {torrent_name}")
+        
+        # Search in __all__ folder first (Zurg stores everything there)
+        for subdir in ["__all__", "shows", "anime"]:
+            search_path = self.mount_path / subdir / torrent_name
+            
+            if not search_path.exists():
+                continue
+            
+            # Search for video files with matching episode pattern
+            video_exts = {'.mkv', '.mp4', '.avi', '.mov', '.m4v'}
+            
+            for video_file in search_path.rglob("*"):
+                if not video_file.is_file():
+                    continue
+                if video_file.suffix.lower() not in video_exts:
+                    continue
+                
+                filename_lower = video_file.name.lower()
+                for pattern in patterns:
+                    if re.search(pattern, filename_lower, re.IGNORECASE):
+                        logger.info(f"Found episode file: {video_file.name}")
+                        return video_file
+        
+        logger.debug(f"Episode S{season:02d}E{episode:02d} not found in {torrent_name}")
+        return None
+    
     def find_episode(self, show_title: str, season: int, episode: int) -> Optional[Path]:
         """
         Find a specific episode file in the mount.
@@ -184,7 +227,7 @@ class SymlinkService:
         
         matches = []
         
-        for subdir in ["shows", "anime", "__all__"]:
+        for subdir in ["__all__", "shows", "anime"]:
             search_path = self.mount_path / subdir
             if not search_path.exists():
                 continue

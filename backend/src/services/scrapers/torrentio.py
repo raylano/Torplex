@@ -42,9 +42,19 @@ class TorrentioScraper:
     SIZE_PATTERN = re.compile(r'(\d+\.?\d*)\s*(GB|MB|TB)', re.IGNORECASE)
     SEEDERS_PATTERN = re.compile(r'👤\s*(\d+)')
     
-    # Anime patterns
-    DUAL_AUDIO_PATTERN = re.compile(r'(dual[\s\-_]?audio|multi[\s\-_]?audio|japanese\s*\+\s*english|eng?\s*\+\s*jap)', re.IGNORECASE)
-    DUBBED_PATTERN = re.compile(r'(dubbed|dub|english\s*dub)', re.IGNORECASE)
+    # Anime patterns - enhanced for better detection
+    DUAL_AUDIO_PATTERN = re.compile(
+        r'(dual[\s\-_]?audio|multi[\s\-_]?audio|japanese\s*\+\s*english|'
+        r'eng?\s*\+\s*jap|jpn?\s*\+\s*eng|multi[\s\-_]?lang|'
+        r'\b(eng|jpn|ita)\s+(eng|jpn|ita)\b)', 
+        re.IGNORECASE
+    )
+    # Prioritize English dubbed releases
+    DUBBED_PATTERN = re.compile(
+        r'(\beng(lish)?\s*(dub|audio)|\bdub(bed)?\b|'
+        r'english\s+dub|\bEMBER\b|\beng\s+audio|funimation)', 
+        re.IGNORECASE
+    )
     RELEASE_GROUP_PATTERN = re.compile(r'\[([^\]]+)\]')
     
     def __init__(self, custom_url: Optional[str] = None):

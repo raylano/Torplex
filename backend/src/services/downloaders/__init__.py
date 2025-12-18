@@ -82,6 +82,70 @@ class DownloaderOrchestrator:
         
         return results
     
+    async def check_instant_via_add(self, info_hash: str) -> Optional[Dict]:
+        """
+        Riven-style instant availability check:
+        1. Add torrent to RD
+        2. Select video files
+        3. Check if status is 'downloaded'
+        
+        Returns dict with torrent info if cached, None otherwise.
+        """
+        if not self.real_debrid.is_configured:
+            return None
+        
+        torrent_id = None
+        try:
+            torrent_id = await self.real_debrid.add_magnet(info_hash)
+            if not torrent_id:
+                return None
+            
+            info = await self.real_debrid.get_torrent_info(torrent_id)
+            if not info:
+                if torrent_id:
+                    await self.real_debrid.delete_torrent(torrent_id)
+                return None
+            
+            # If waiting for file selection, select video files
+            if info.get("status") == "waiting_files_selection":
+                video_exts = ('.mkv', '.mp4', '.avi', '.mov', '.m4v')
+                video_ids = [
+                    str(f["id"]) for f in info.get("files", [])
+                    if f.get("path", "").lower().endswith(video_exts)
+                ]
+                
+                if not video_ids:
+                    await self.real_debrid.delete_torrent(torrent_id)
+                    return None
+                
+                await self.real_debrid.select_files(torrent_id, ",".join(video_ids))
+                info = await self.real_debrid.get_torrent_info(torrent_id)
+            
+            # Check if instantly available
+            if info.get("status") == "downloaded":
+                logger.info(f"✅ Cached! {info.get('filename', '')[:40]}...")
+                return {
+                    "cached": True,
+                    "torrent_id": torrent_id,
+                    "filename": info.get("filename"),
+                    "files": info.get("files", []),
+                    "links": info.get("links", []),
+                }
+            
+            # Not cached - delete torrent
+            logger.debug(f"Not cached (status={info.get('status')}), deleting torrent")
+            await self.real_debrid.delete_torrent(torrent_id)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Instant check failed for {info_hash[:8]}: {e}")
+            if torrent_id:
+                try:
+                    await self.real_debrid.delete_torrent(torrent_id)
+                except:
+                    pass
+            return None
+    
     async def add_torrent(
         self,
         info_hash: str,
