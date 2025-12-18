@@ -184,7 +184,7 @@ services:
       - torplex_net
 
   # ============================================================================
-  # PLEX - Media Server (Optional)
+  # PLEX - Media Server
   # ============================================================================
   plex:
     image: lscr.io/linuxserver/plex:latest
@@ -196,10 +196,10 @@ services:
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Amsterdam}
       - VERSION=docker
+      - PLEX_CLAIM=${PLEX_CLAIM:-}
     volumes:
       - ./config/plex:/config
       - ./data/media:/data/media:rslave
-    profiles: ["plex"]
 
 networks:
   torplex_net:
