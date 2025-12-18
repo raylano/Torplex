@@ -3,14 +3,16 @@
 import Image from 'next/image'
 import { MediaItem } from '@/lib/api'
 import StatusBadge from './StatusBadge'
+import RetryDropdown from './RetryDropdown'
 import { Film, Tv, Star, Sparkles } from 'lucide-react'
 
 interface MediaCardProps {
     item: MediaItem
     onClick?: () => void
+    onRefresh?: () => void
 }
 
-export default function MediaCard({ item, onClick }: MediaCardProps) {
+export default function MediaCard({ item, onClick, onRefresh }: MediaCardProps) {
     const isShow = item.type === 'show' || item.type === 'anime_show'
     const isAnime = item.is_anime || item.type.includes('anime')
 
@@ -47,9 +49,18 @@ export default function MediaCard({ item, onClick }: MediaCardProps) {
                     <StatusBadge status={item.state} />
                 </div>
 
+                {/* Retry dropdown - show on hover */}
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <RetryDropdown
+                        itemId={item.id}
+                        itemType={isShow ? 'show' : 'movie'}
+                        onRetryComplete={onRefresh}
+                    />
+                </div>
+
                 {/* Anime badge */}
                 {isAnime && (
-                    <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-full bg-accent-500/20 border border-accent-500/30">
+                    <div className="absolute top-10 right-2 flex items-center gap-1 px-2 py-1 rounded-full bg-accent-500/20 border border-accent-500/30">
                         <Sparkles size={12} className="text-accent-400" />
                         <span className="text-xs text-accent-300 font-medium">Anime</span>
                     </div>

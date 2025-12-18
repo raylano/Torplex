@@ -262,19 +262,98 @@ async def delete_media_item(item_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/library/{item_id}/retry")
-async def retry_media_item(item_id: int, db: AsyncSession = Depends(get_db)):
-    """Retry a failed media item"""
+async def retry_media_item(
+    item_id: int, 
+    mode: str = Query("force", description="Retry mode: force, symlink"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Retry a media item with different modes:
+    - force: Restart from beginning (REQUESTED state)
+    - symlink: Only retry symlink creation (DOWNLOADED state)
+    """
     result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
     item = result.scalar_one_or_none()
     
     if not item:
         raise HTTPException(status_code=404, detail="Media item not found")
     
-    item.state = MediaState.REQUESTED
+    if mode == "symlink":
+        item.state = MediaState.DOWNLOADED
+    else:  # force
+        item.state = MediaState.REQUESTED
+    
     item.last_error = None
+    item.retry_count = 0
     await db.commit()
     
-    return {"message": "Retry queued", "id": item_id}
+    return {"message": f"Retry ({mode}) queued", "id": item_id, "new_state": item.state.value}
+
+
+@router.get("/library/{item_id}/mount-files")
+async def list_mount_files(item_id: int, db: AsyncSession = Depends(get_db)):
+    """List available files in mount that could be symlinked"""
+    from src.services.filesystem import symlink_service
+    
+    result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    
+    # Search mount for matching files
+    files = []
+    mount_path = symlink_service.mount_path
+    
+    for subdir in ["movies", "shows", "anime", "__all__"]:
+        search_path = mount_path / subdir
+        if not search_path.exists():
+            continue
+        
+        for folder in search_path.iterdir():
+            if folder.is_dir():
+                video_files = symlink_service._find_video_files(folder)
+                for vf in video_files[:3]:  # Max 3 per folder
+                    files.append({
+                        "path": str(vf),
+                        "name": vf.name,
+                        "folder": folder.name,
+                        "size_mb": round(vf.stat().st_size / (1024 * 1024), 1)
+                    })
+    
+    return {"files": files[:50]}  # Max 50 files
+
+
+@router.post("/library/{item_id}/manual-symlink")
+async def manual_symlink(
+    item_id: int,
+    file_path: str = Query(..., description="Full path to source file"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Manually create symlink to a specific file"""
+    from pathlib import Path
+    from src.services.filesystem import symlink_service
+    
+    result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    
+    source = Path(file_path)
+    if not source.exists():
+        raise HTTPException(status_code=400, detail="Source file not found")
+    
+    success, symlink_path = symlink_service.create_symlink(item, source)
+    
+    if success:
+        item.file_path = str(source)
+        item.symlink_path = str(symlink_path)
+        item.state = MediaState.SYMLINKED
+        await db.commit()
+        return {"message": "Symlink created", "symlink_path": str(symlink_path)}
+    
+    raise HTTPException(status_code=500, detail="Failed to create symlink")
 
 
 # Episode endpoints
@@ -378,4 +457,40 @@ async def retry_episode(
         "season": episode.season_number,
         "episode": episode.episode_number,
     }
+
+
+@router.post("/library/{item_id}/retry-all-episodes")
+async def retry_all_episodes(
+    item_id: int,
+    mode: str = Query("failed", description="Which episodes: failed, all"),
+    db: AsyncSession = Depends(get_db)
+):
+    """Retry all (or failed) episodes of a series"""
+    # Verify show exists
+    show_result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    show = show_result.scalar_one_or_none()
+    
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    
+    if show.type not in [MediaType.SHOW, MediaType.ANIME_SHOW]:
+        raise HTTPException(status_code=400, detail="Not a TV show")
+    
+    # Get episodes to retry
+    query = select(Episode).where(Episode.show_id == item_id)
+    if mode == "failed":
+        query = query.where(Episode.state == MediaState.FAILED)
+    
+    result = await db.execute(query)
+    episodes = result.scalars().all()
+    
+    count = 0
+    for ep in episodes:
+        ep.state = MediaState.REQUESTED
+        count += 1
+    
+    await db.commit()
+    
+    return {"message": f"Retry queued for {count} episodes", "count": count}
+
 
