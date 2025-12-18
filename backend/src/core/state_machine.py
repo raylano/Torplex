@@ -70,46 +70,55 @@ class StateMachine:
         """Fetch metadata from TMDB"""
         logger.info(f"Indexing: {item.title}")
         
+        is_tv = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
+        tmdb_id = None
+        
         # Try to find by IMDB ID first
         if item.imdb_id:
             data = await tmdb_service.find_by_imdb(item.imdb_id)
             if data:
-                metadata = tmdb_service.extract_metadata(data, data.get("type", "movie"))
-                self._apply_metadata(item, metadata)
-                item.state = MediaState.INDEXED
-                await session.commit()
-                return MediaState.INDEXED
+                tmdb_id = data.get("id")
+                # For find_by_imdb we still need to get full details
         
-        # Search by title
-        is_tv = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
-        
-        if is_tv:
-            results = await tmdb_service.search_tv(item.title, item.year)
-        else:
-            results = await tmdb_service.search_movie(item.title, item.year)
-        
-        if results:
-            # Use first result
-            result = results[0]
-            tmdb_id = result.get("id")
-            
-            # Get full details
+        # Search by title if no TMDB ID yet
+        if not tmdb_id:
             if is_tv:
-                full_data = await tmdb_service.get_tv_show(tmdb_id)
+                results = await tmdb_service.search_tv(item.title, item.year)
             else:
-                full_data = await tmdb_service.get_movie(tmdb_id)
+                results = await tmdb_service.search_movie(item.title, item.year)
             
-            if full_data:
-                media_type = "tv" if is_tv else "movie"
-                metadata = tmdb_service.extract_metadata(full_data, media_type)
-                self._apply_metadata(item, metadata)
-                item.state = MediaState.INDEXED
-                await session.commit()
-                return MediaState.INDEXED
+            if results:
+                tmdb_id = results[0].get("id")
         
-        logger.warning(f"Could not find metadata for: {item.title}")
+        if not tmdb_id:
+            logger.warning(f"Could not find metadata for: {item.title}")
+            item.state = MediaState.FAILED
+            item.last_error = "Metadata not found on TMDB"
+            await session.commit()
+            return MediaState.FAILED
+        
+        # ALWAYS get full details (needed for number_of_seasons for TV shows)
+        if is_tv:
+            full_data = await tmdb_service.get_tv_show(tmdb_id)
+        else:
+            full_data = await tmdb_service.get_movie(tmdb_id)
+        
+        if full_data:
+            media_type = "tv" if is_tv else "movie"
+            metadata = tmdb_service.extract_metadata(full_data, media_type)
+            self._apply_metadata(item, metadata)
+            
+            # Log for debugging
+            if is_tv:
+                logger.info(f"TV Show {item.title}: {item.number_of_seasons} seasons, {item.number_of_episodes} episodes")
+            
+            item.state = MediaState.INDEXED
+            await session.commit()
+            return MediaState.INDEXED
+        
+        logger.warning(f"Could not get full details for: {item.title}")
         item.state = MediaState.FAILED
-        item.last_error = "Metadata not found on TMDB"
+        item.last_error = "Failed to get TMDB details"
         await session.commit()
         return MediaState.FAILED
     
