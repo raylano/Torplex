@@ -32,8 +32,8 @@ class TorrentioScraper:
     # Default Torrentio URL with good filters
     BASE_URL = "https://torrentio.strem.fun"
     
-    # Quality filters - prioritize quality
-    DEFAULT_FILTER = "sort=qualitysize|qualityfilter=480p,scr,cam"
+    # Quality filters - max 1080p, filter out low quality
+    DEFAULT_FILTER = "sort=qualitysize|qualityfilter=480p,scr,cam,2160p,4k"  # Exclude 4K
     
     # Patterns for parsing
     RESOLUTION_PATTERN = re.compile(r'(2160p|1080p|720p|480p|4K|UHD)', re.IGNORECASE)

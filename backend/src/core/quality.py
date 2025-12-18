@@ -174,6 +174,13 @@ class QualityRanker:
             score.seeders_score
         )
         
+        # Penalty for non-English releases (ITA, FRA, GER etc without ENG)
+        title_lower = torrent.title.lower()
+        has_foreign_only = any(lang in title_lower for lang in ['ita', 'italian', 'fra', 'french', 'ger', 'german', 'spa', 'spanish'])
+        has_english = any(eng in title_lower for eng in ['eng', 'english', 'multi'])
+        if has_foreign_only and not has_english:
+            score.total -= 500  # Penalize foreign-only releases
+        
         # Anime bonuses
         if is_anime:
             if torrent.is_dual_audio:
