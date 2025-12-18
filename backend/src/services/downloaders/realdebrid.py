@@ -75,34 +75,19 @@ class RealDebridService:
         """
         Check if torrents are instantly available (cached).
         Returns dict mapping info_hash -> is_cached
+        
+        NOTE: Real-Debrid disabled this endpoint in 2024.
+        We skip the check and just try to add torrents directly.
+        Cached torrents will complete instantly anyway.
         """
         if not info_hashes:
             return {}
         
-        # Real-Debrid accepts up to 200 hashes per request
-        hashes = [h.lower() for h in info_hashes[:200]]
-        hash_string = "/".join(hashes)
-        
-        result = await self._request("GET", f"/torrents/instantAvailability/{hash_string}")
-        
-        if not result:
-            return {h: False for h in hashes}
-        
-        cached_status = {}
-        for hash_key in hashes:
-            # Real-Debrid returns nested structure with file info if cached
-            hash_data = result.get(hash_key, {})
-            if hash_data and isinstance(hash_data, dict):
-                # Has data = is cached
-                rd_data = hash_data.get("rd", [])
-                cached_status[hash_key] = len(rd_data) > 0
-            else:
-                cached_status[hash_key] = False
-        
-        cached_count = sum(1 for v in cached_status.values() if v)
-        logger.debug(f"Real-Debrid: {cached_count}/{len(hashes)} torrents cached")
-        
-        return cached_status
+        # Skip cache check - endpoint disabled by Real-Debrid
+        # All torrents will be tried, cached ones will complete instantly
+        logger.debug(f"Skipping cache check (endpoint disabled) for {len(info_hashes)} hashes")
+        return {h.lower(): False for h in info_hashes}
+
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def add_magnet(self, info_hash: str) -> Optional[str]:
