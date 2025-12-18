@@ -175,6 +175,9 @@ class SymlinkService:
         patterns = [
             rf's0?{season}e0?{episode}\b',       # S1E1, S01E01, S1E01, etc
             rf'{season}x0?{episode}\b',          # 1x01
+            # Anime specific patterns (when we are inside the torrent, we can be looser)
+            rf'(?:e|ep|episode)\.?\s*0?{episode}\b', # Episode 01
+            rf'(?:^|[\s\-\.\[\(])0?{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 01 ", "[01]"
         ]
         
         logger.info(f"Searching for S{season:02d}E{episode:02d} in torrent: {torrent_name}")
@@ -217,6 +220,9 @@ class SymlinkService:
             rf's{season}e{episode}',              # S1E1
             rf'{season}x{episode:02d}',           # 1x01
             rf'season\s*{season}.*episode\s*{episode}',  # Season 1 Episode 1
+            # Anime/Absolute specific patterns
+            rf'(?:e|ep|episode)\.?\s*{episode:02d}', # Episode 01
+            rf'(?:^|[\s\-\.\[\(]){episode:02d}(?:[\s\-\.\]\)]|$)', # " 01 ", "[01]" (strict 2 digit match for global search)
         ]
         
         # Clean show title for matching
