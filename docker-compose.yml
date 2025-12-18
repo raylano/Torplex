@@ -72,8 +72,7 @@ services:
       --buffer-size 32M
       --log-level INFO
     depends_on:
-      zurg:
-        condition: service_healthy
+      - zurg  # Just wait for start, health check not needed
     networks:
       - torplex_net
 
