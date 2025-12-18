@@ -90,6 +90,31 @@ class TMDBService:
         result = await self._request(f"/trending/{media_type}/{time_window}")
         return result.get("results", []) if result else []
     
+    async def get_all_episodes(self, tmdb_id: int, num_seasons: int) -> List[Dict]:
+        """
+        Fetch all episodes for a TV show.
+        Returns list of episode dicts with season_number, episode_number, title, overview, air_date
+        """
+        all_episodes = []
+        
+        for season_num in range(1, num_seasons + 1):
+            season_data = await self.get_tv_season(tmdb_id, season_num)
+            if not season_data:
+                continue
+            
+            for ep in season_data.get("episodes", []):
+                all_episodes.append({
+                    "season_number": ep.get("season_number", season_num),
+                    "episode_number": ep.get("episode_number"),
+                    "title": ep.get("name"),
+                    "overview": ep.get("overview"),
+                    "air_date": ep.get("air_date"),
+                })
+        
+        logger.info(f"TMDB: Fetched {len(all_episodes)} episodes for show {tmdb_id}")
+        return all_episodes
+
+    
     def is_anime(self, data: Dict) -> bool:
         """
         Determine if a movie/show is anime based on:

@@ -9,8 +9,9 @@ from sqlalchemy import select
 
 from src.config import settings
 from src.database import async_session
-from src.models import MediaItem, MediaState
+from src.models import MediaItem, MediaState, MediaType
 from src.core.state_machine import state_machine
+from src.core.episode_processor import episode_processor
 from src.services.content import plex_service, tmdb_service
 
 
@@ -20,7 +21,7 @@ scheduler = AsyncIOScheduler()
 async def process_pending_items():
     """Process all items that need work"""
     async with async_session() as session:
-        # Get items that need processing
+        # Get media items that need processing
         processable_states = [
             MediaState.REQUESTED,
             MediaState.INDEXED,
@@ -34,7 +35,7 @@ async def process_pending_items():
             select(MediaItem)
             .where(MediaItem.state.in_(processable_states))
             .order_by(MediaItem.created_at)
-            .limit(10)  # Process in batches
+            .limit(10)
         )
         items = result.scalars().all()
         
@@ -43,10 +44,41 @@ async def process_pending_items():
         
         for item in items:
             try:
+                # For TV shows, create episodes after indexing
+                is_tv_show = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
+                
+                if is_tv_show and item.state == MediaState.INDEXED:
+                    # Create episode records for this show
+                    await episode_processor.create_episodes_for_show(item, session)
+                    # Mark show as completed (episodes will process individually)
+                    item.state = MediaState.COMPLETED
+                    await session.commit()
+                    logger.info(f"TV Show {item.title} indexed, episodes created")
+                    continue
+                
+                # For movies, process normally
                 new_state = await state_machine.process_item(item, session)
                 logger.debug(f"{item.title}: {item.state} -> {new_state}")
+                
             except Exception as e:
                 logger.error(f"Error processing {item.title}: {e}")
+
+
+async def process_pending_episodes():
+    """Process TV show episodes individually"""
+    async with async_session() as session:
+        # Get pending episodes with their parent shows
+        pending = await episode_processor.get_pending_episodes(session, limit=10)
+        
+        if pending:
+            logger.info(f"Processing {len(pending)} pending episodes...")
+        
+        for episode, show in pending:
+            try:
+                new_state = await episode_processor.process_episode(episode, show, session)
+                logger.debug(f"{show.title} S{episode.season_number}E{episode.episode_number}: -> {new_state}")
+            except Exception as e:
+                logger.error(f"Error processing episode: {e}")
 
 
 async def sync_plex_watchlist():
@@ -135,6 +167,15 @@ def setup_scheduler():
         IntervalTrigger(seconds=settings.library_scan_interval),
         id="process_pending",
         name="Process Pending Items",
+        replace_existing=True,
+    )
+    
+    # Process pending episodes every 30 seconds
+    scheduler.add_job(
+        process_pending_episodes,
+        IntervalTrigger(seconds=30),
+        id="process_episodes",
+        name="Process Pending Episodes",
         replace_existing=True,
     )
     

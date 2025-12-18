@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Filter, Film, Tv, Sparkles, RefreshCw } from 'lucide-react'
 import { api, MediaItem, PaginatedResponse } from '@/lib/api'
 import MediaCard from '@/components/MediaCard'
@@ -22,6 +23,7 @@ const stateFilters = [
 ]
 
 export default function LibraryPage() {
+    const router = useRouter()
     const [data, setData] = useState<PaginatedResponse<MediaItem> | null>(null)
     const [loading, setLoading] = useState(true)
     const [activeType, setActiveType] = useState('')
@@ -120,9 +122,16 @@ export default function LibraryPage() {
                 </div>
             ) : data?.items.length ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {data.items.map((item) => (
-                        <MediaCard key={item.id} item={item} />
-                    ))}
+                    {data.items.map((item) => {
+                        const isShow = item.type === 'show' || item.type === 'anime_show'
+                        return (
+                            <MediaCard
+                                key={item.id}
+                                item={item}
+                                onClick={isShow ? () => router.push(`/show/${item.id}`) : undefined}
+                            />
+                        )
+                    })}
                 </div>
             ) : (
                 <div className="glass rounded-2xl p-12 text-center">

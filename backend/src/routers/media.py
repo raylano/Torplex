@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from src.database import get_db
-from src.models import MediaItem, MediaState, MediaType
+from src.models import MediaItem, Episode, MediaState, MediaType
 
 router = APIRouter()
 
@@ -275,3 +275,107 @@ async def retry_media_item(item_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
     
     return {"message": "Retry queued", "id": item_id}
+
+
+# Episode endpoints
+
+class EpisodeResponse(BaseModel):
+    id: int
+    season_number: int
+    episode_number: int
+    title: Optional[str] = None
+    overview: Optional[str] = None
+    air_date: Optional[str] = None
+    state: str
+    file_path: Optional[str] = None
+    symlink_path: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class EpisodesListResponse(BaseModel):
+    show_id: int
+    show_title: str
+    total_episodes: int
+    completed_episodes: int
+    episodes: List[EpisodeResponse]
+
+
+@router.get("/library/{item_id}/episodes", response_model=EpisodesListResponse)
+async def get_episodes(item_id: int, db: AsyncSession = Depends(get_db)):
+    """Get all episodes for a TV show"""
+    # Get the show
+    result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    show = result.scalar_one_or_none()
+    
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    
+    if show.type not in [MediaType.SHOW, MediaType.ANIME_SHOW]:
+        raise HTTPException(status_code=400, detail="Item is not a TV show")
+    
+    # Get episodes
+    ep_result = await db.execute(
+        select(Episode)
+        .where(Episode.show_id == item_id)
+        .order_by(Episode.season_number, Episode.episode_number)
+    )
+    episodes = ep_result.scalars().all()
+    
+    # Count completed
+    completed = sum(1 for ep in episodes if ep.state == MediaState.COMPLETED)
+    
+    return {
+        "show_id": show.id,
+        "show_title": show.title,
+        "total_episodes": len(episodes),
+        "completed_episodes": completed,
+        "episodes": [
+            {
+                "id": ep.id,
+                "season_number": ep.season_number,
+                "episode_number": ep.episode_number,
+                "title": ep.title,
+                "overview": ep.overview,
+                "air_date": ep.air_date,
+                "state": ep.state.value if isinstance(ep.state, MediaState) else ep.state,
+                "file_path": ep.file_path,
+                "symlink_path": ep.symlink_path,
+                "created_at": ep.created_at,
+                "updated_at": ep.updated_at,
+            }
+            for ep in episodes
+        ],
+    }
+
+
+@router.post("/library/{item_id}/episodes/{episode_id}/retry")
+async def retry_episode(
+    item_id: int, 
+    episode_id: int, 
+    db: AsyncSession = Depends(get_db)
+):
+    """Retry a single failed episode"""
+    result = await db.execute(
+        select(Episode)
+        .where(Episode.id == episode_id)
+        .where(Episode.show_id == item_id)
+    )
+    episode = result.scalar_one_or_none()
+    
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    
+    episode.state = MediaState.REQUESTED
+    await db.commit()
+    
+    return {
+        "message": "Episode retry queued", 
+        "episode_id": episode_id,
+        "season": episode.season_number,
+        "episode": episode.episode_number,
+    }
+
