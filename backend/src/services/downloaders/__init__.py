@@ -9,17 +9,20 @@ import asyncio
 from src.services.downloaders.realdebrid import real_debrid_service, RealDebridService
 from src.services.downloaders.torbox import torbox_service, TorboxService
 from src.services.scrapers.torrentio import TorrentResult
+from src.services.scrapers.zilean import zilean_service
 
 
 class DownloaderOrchestrator:
     """
     Orchestrates multiple debrid services.
     Priority: Real-Debrid -> Torbox
+    Uses Zilean for cache checking (more reliable than RD's disabled endpoint)
     """
     
     def __init__(self):
         self.real_debrid = real_debrid_service
         self.torbox = torbox_service
+        self.zilean = zilean_service
     
     @property
     def available_providers(self) -> List[str]:
@@ -33,7 +36,8 @@ class DownloaderOrchestrator:
     
     async def check_cache_all(self, info_hashes: List[str]) -> Dict[str, List[str]]:
         """
-        Check cache status on all available providers.
+        Check cache status using Zilean (DMM database) as primary source.
+        Falls back to debrid provider checks if Zilean not configured.
         Returns dict mapping info_hash -> list of providers where it's cached
         """
         if not info_hashes:
@@ -41,31 +45,36 @@ class DownloaderOrchestrator:
         
         results: Dict[str, List[str]] = {h.lower(): [] for h in info_hashes}
         
-        # Check providers in parallel
-        tasks = []
+        # Use Zilean as primary cache checker for Real-Debrid
+        if self.zilean.is_configured and self.real_debrid.is_configured:
+            logger.info(f"Checking {len(info_hashes)} hashes via Zilean...")
+            try:
+                zilean_results = await self.zilean.check_hashes(info_hashes)
+                for info_hash, is_cached in zilean_results.items():
+                    if is_cached:
+                        results[info_hash.lower()].append("real_debrid")
+            except Exception as e:
+                logger.error(f"Zilean cache check failed: {e}")
         
-        if self.real_debrid.is_configured:
-            tasks.append(("real_debrid", self.real_debrid.check_instant_availability(info_hashes)))
-        
+        # Check Torbox directly (if configured and has its own instant availability)
         if self.torbox.is_configured:
-            tasks.append(("torbox", self.torbox.check_instant_availability(info_hashes)))
+            try:
+                torbox_results = await self.torbox.check_instant_availability(info_hashes)
+                for info_hash, is_cached in torbox_results.items():
+                    if is_cached and "torbox" not in results.get(info_hash.lower(), []):
+                        results[info_hash.lower()].append("torbox")
+            except Exception as e:
+                logger.error(f"Torbox cache check failed: {e}")
         
-        if not tasks:
-            logger.warning("No debrid providers configured")
-            return results
-        
-        # Run all checks in parallel
-        provider_results = await asyncio.gather(*[t[1] for t in tasks], return_exceptions=True)
-        
-        for i, (provider_name, _) in enumerate(tasks):
-            result = provider_results[i]
-            if isinstance(result, Exception):
-                logger.error(f"Cache check failed for {provider_name}: {result}")
-                continue
-            
-            for info_hash, is_cached in result.items():
-                if is_cached:
-                    results[info_hash.lower()].append(provider_name)
+        # If no Zilean configured, try RD directly (likely won't work due to disabled endpoint)
+        if not self.zilean.is_configured and self.real_debrid.is_configured:
+            try:
+                rd_results = await self.real_debrid.check_instant_availability(info_hashes)
+                for info_hash, is_cached in rd_results.items():
+                    if is_cached:
+                        results[info_hash.lower()].append("real_debrid")
+            except Exception as e:
+                logger.debug(f"RD cache check failed (expected): {e}")
         
         # Log summary
         cached_on_any = sum(1 for v in results.values() if v)
