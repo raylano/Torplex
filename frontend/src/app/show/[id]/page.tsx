@@ -64,7 +64,7 @@ export default function ShowDetailPage() {
         try {
             const [showData, epData] = await Promise.all([
                 api.getMediaItem(parseInt(showId)),
-                fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/library/${showId}/episodes`)
+                fetch(`/api/library/${showId}/episodes`)
                     .then(r => r.json())
             ])
             setShow(showData)
@@ -87,7 +87,7 @@ export default function ShowDetailPage() {
         setRetrying(episodeId)
         try {
             await fetch(
-                `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/library/${showId}/episodes/${episodeId}/retry`,
+                `/api/library/${showId}/episodes/${episodeId}/retry`,
                 { method: 'POST' }
             )
             await fetchData()

@@ -10,7 +10,7 @@ interface RetryDropdownProps {
     onRetryComplete?: () => void
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
 export default function RetryDropdown({ itemId, itemType, showId, onRetryComplete }: RetryDropdownProps) {
     const [isOpen, setIsOpen] = useState(false)

@@ -10,8 +10,15 @@ const nextConfig = {
             },
         ],
     },
-    env: {
-        NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+    async rewrites() {
+        // Proxy /api/* to backend - works with any host
+        const backendUrl = process.env.BACKEND_URL || 'http://backend:8000'
+        return [
+            {
+                source: '/api/:path*',
+                destination: `${backendUrl}/api/:path*`,
+            },
+        ]
     },
 }
 
