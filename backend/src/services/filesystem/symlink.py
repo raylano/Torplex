@@ -176,33 +176,51 @@ class SymlinkService:
             rf's0?{season}e0?{episode}\b',       # S1E1, S01E01, S1E01, etc
             rf'{season}x0?{episode}\b',          # 1x01
             # Anime specific patterns (when we are inside the torrent, we can be looser)
-            rf'(?:e|ep|episode)\.?\s*0?{episode}\b', # Episode 01
-            rf'(?:^|[\s\-\.\[\(])0?{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 01 ", "[01]"
+            rf'(?:e|ep|episode)\.?\s*0*{episode}\b', # Episode 001
+            rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", " 01 "
         ]
         
         logger.info(f"Searching for S{season:02d}E{episode:02d} in torrent: {torrent_name}")
         
-        # Search in __all__ folder first (Zurg stores everything there)
-        for subdir in ["__all__", "shows", "anime"]:
-            search_path = self.mount_path / subdir / torrent_name
-            
-            if not search_path.exists():
+        # Search in standard mount locations
+        search_paths = [
+            self.mount_path / "__all__" / torrent_name,
+            self.mount_path / "shows" / torrent_name,
+            self.mount_path / "anime" / torrent_name
+        ]
+        
+        video_exts = {'.mkv', '.mp4', '.avi', '.mov', '.m4v'}
+        found_files = []
+
+        # Collect all video files from potential locations
+        for folder in search_paths:
+            if not folder.exists():
                 continue
-            
-            # Search for video files with matching episode pattern
-            video_exts = {'.mkv', '.mp4', '.avi', '.mov', '.m4v'}
-            
-            for video_file in search_path.rglob("*"):
-                if not video_file.is_file():
-                    continue
-                if video_file.suffix.lower() not in video_exts:
-                    continue
                 
-                filename_lower = video_file.name.lower()
-                for pattern in patterns:
-                    if re.search(pattern, filename_lower, re.IGNORECASE):
-                        logger.info(f"Found episode file: {video_file.name}")
-                        return video_file
+            logger.info(f"Checking folder: {folder}")
+            try:
+                for video_file in folder.rglob("*"):
+                    if not video_file.is_file():
+                        continue
+                    if video_file.suffix.lower() not in video_exts:
+                        continue
+                    found_files.append(video_file)
+            except Exception as e:
+                logger.error(f"Error listing files in {folder}: {e}")
+
+        if not found_files:
+            logger.warning(f"No video files found in torrent folders for {torrent_name}")
+            return None
+            
+        logger.info(f"Found {len(found_files)} potential video files: {[f.name for f in found_files]}")
+
+        # Check for matches
+        for file in found_files:
+            filename_lower = file.name.lower()
+            for pattern in patterns:
+                if re.search(pattern, filename_lower, re.IGNORECASE):
+                    logger.info(f"Match found: {file.name} with pattern {pattern}")
+                    return file
         
         logger.debug(f"Episode S{season:02d}E{episode:02d} not found in {torrent_name}")
         return None
@@ -221,8 +239,8 @@ class SymlinkService:
             rf'{season}x{episode:02d}',           # 1x01
             rf'season\s*{season}.*episode\s*{episode}',  # Season 1 Episode 1
             # Anime/Absolute specific patterns
-            rf'(?:e|ep|episode)\.?\s*{episode:02d}', # Episode 01
-            rf'(?:^|[\s\-\.\[\(]){episode:02d}(?:[\s\-\.\]\)]|$)', # " 01 ", "[01]" (strict 2 digit match for global search)
+            rf'(?:e|ep|episode)\.?\s*0*{episode:02d}', # Episode 001, Episode 01
+            rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", "[01]"
         ]
         
         # Clean show title for matching
@@ -240,36 +258,46 @@ class SymlinkService:
             
             for item in search_path.iterdir():
                 item_name_lower = item.name.lower()
-                
-                # Check if episode pattern matches
-                episode_match = False
-                for pattern in patterns:
-                    if re.search(pattern, item_name_lower, re.IGNORECASE):
-                        episode_match = True
-                        break
-                
-                if not episode_match:
-                    continue
+                clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
                 
                 # Check if show title matches (at least first 2 keywords)
+                # This is critical for Season packs -> "Attack on Titan Season 1" matches title, then we look inside
+                title_match = False
                 if title_words:
-                    clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
-                    if not all(w in clean_item for w in title_words[:2]):
-                        continue
-                
-                # Found a match - get video file
+                    if all(w in clean_item for w in title_words): # Require all keywords (up to 3) for safety to avoid false positives
+                        title_match = True
+                else:
+                    # No keywords (short title) - fuzzy match whole clean title
+                    if clean_title in clean_item:
+                        title_match = True
+
+                # If the folder/file doesn't even contain the show name, skip it
+                # (Unless it's a generic "S01E01" file in root, but that's rare/risky in __all__)
+                if not title_match:
+                    continue
+
+                # Now check for episode match
                 if item.is_file():
-                    matches.append(item)
+                    for pattern in patterns:
+                        if re.search(pattern, item_name_lower, re.IGNORECASE):
+                            matches.append(item)
+                            break
+                            
                 elif item.is_dir():
-                    video_files = self._find_video_files(item)
-                    if video_files:
-                        # For episode packs, find the specific episode file
+                    # For directories matching the show title, looks for video files inside matching episode regex
+                    try:
+                        # Optimization: if directory is "Show Name Season X", only checking files if season matches? 
+                        # No, just check all video files, it's safer for absolute numbering
+                        video_files = self._find_video_files(item)
                         for vf in video_files:
                             vf_name_lower = vf.name.lower()
                             for pattern in patterns:
                                 if re.search(pattern, vf_name_lower, re.IGNORECASE):
                                     matches.append(vf)
+                                    # Found match in this folder, but don't break, maybe better quality exists?
                                     break
+                    except Exception as e:
+                        logger.error(f"Error scanning folder {item}: {e}")
         
         if not matches:
             logger.warning(f"No episode match for: {show_title} S{season:02d}E{episode:02d}")
