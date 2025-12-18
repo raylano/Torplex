@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
 import { Filter, Film, Tv, Sparkles, RefreshCw } from 'lucide-react'
 import { api, MediaItem, PaginatedResponse } from '@/lib/api'
 import MediaCard from '@/components/MediaCard'
 import { clsx } from 'clsx'
+
 
 const typeFilters = [
     { value: '', label: 'All', icon: null },
@@ -22,9 +22,6 @@ const stateFilters = [
 ]
 
 export default function LibraryPage() {
-    const router = useRouter()
-    const searchParams = useSearchParams()
-
     const [data, setData] = useState<PaginatedResponse<MediaItem> | null>(null)
     const [loading, setLoading] = useState(true)
     const [activeType, setActiveType] = useState('')
