@@ -158,15 +158,17 @@ class EpisodeProcessor:
         """Create symlink for episode"""
         logger.info(f"Symlinking: {show.title} S{episode.season_number:02d}E{episode.episode_number:02d}")
         
-        # Search for file in mount
-        search_title = f"{show.title} S{episode.season_number:02d}E{episode.episode_number:02d}"
-        source_path = symlink_service.find_by_infohash(episode.file_path, title=search_title)
+        # Use the episode-specific search function
+        source_path = symlink_service.find_episode(
+            show.title,
+            episode.season_number,
+            episode.episode_number
+        )
         
         if not source_path:
-            # Try alternate search patterns
-            source_path = symlink_service.find_by_title(
-                f"{show.title} {episode.season_number}x{episode.episode_number:02d}"
-            )
+            # Fallback: try by infohash with episode in search
+            search_title = f"{show.title} S{episode.season_number:02d}E{episode.episode_number:02d}"
+            source_path = symlink_service.find_by_infohash(episode.file_path, title=search_title)
         
         if not source_path:
             logger.warning(f"File not found for: S{episode.season_number}E{episode.episode_number}")

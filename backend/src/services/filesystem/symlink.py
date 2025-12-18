@@ -160,8 +160,76 @@ class SymlinkService:
         
         logger.info(f"Found match: {best_folder.name} (score: {best_score})")
         return best_file if best_file else best_folder
-
-
+    
+    def find_episode(self, show_title: str, season: int, episode: int) -> Optional[Path]:
+        """
+        Find a specific episode file in the mount.
+        Searches for S01E01/s01e01/1x01 patterns.
+        """
+        import re
+        
+        # Patterns to match episode numbers (case insensitive)
+        patterns = [
+            rf's{season:02d}e{episode:02d}',      # S01E01
+            rf's{season}e{episode}',              # S1E1
+            rf'{season}x{episode:02d}',           # 1x01
+            rf'season\s*{season}.*episode\s*{episode}',  # Season 1 Episode 1
+        ]
+        
+        # Clean show title for matching
+        clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', show_title.lower())
+        title_words = [w for w in clean_title.split() if len(w) > 2][:3]
+        
+        logger.info(f"Searching for episode: {show_title} S{season:02d}E{episode:02d}")
+        
+        matches = []
+        
+        for subdir in ["shows", "anime", "__all__"]:
+            search_path = self.mount_path / subdir
+            if not search_path.exists():
+                continue
+            
+            for item in search_path.iterdir():
+                item_name_lower = item.name.lower()
+                
+                # Check if episode pattern matches
+                episode_match = False
+                for pattern in patterns:
+                    if re.search(pattern, item_name_lower, re.IGNORECASE):
+                        episode_match = True
+                        break
+                
+                if not episode_match:
+                    continue
+                
+                # Check if show title matches (at least first 2 keywords)
+                if title_words:
+                    clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
+                    if not all(w in clean_item for w in title_words[:2]):
+                        continue
+                
+                # Found a match - get video file
+                if item.is_file():
+                    matches.append(item)
+                elif item.is_dir():
+                    video_files = self._find_video_files(item)
+                    if video_files:
+                        # For episode packs, find the specific episode file
+                        for vf in video_files:
+                            vf_name_lower = vf.name.lower()
+                            for pattern in patterns:
+                                if re.search(pattern, vf_name_lower, re.IGNORECASE):
+                                    matches.append(vf)
+                                    break
+        
+        if not matches:
+            logger.warning(f"No episode match for: {show_title} S{season:02d}E{episode:02d}")
+            return None
+        
+        # Return largest match (most likely to be the correct quality)
+        matches.sort(key=lambda p: p.stat().st_size if p.exists() else 0, reverse=True)
+        logger.info(f"Found episode: {matches[0].name}")
+        return matches[0]
     
     def _find_video_files(self, directory: Path) -> list[Path]:
         """Find video files in directory, sorted by size (largest first)"""
