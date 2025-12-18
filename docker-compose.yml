@@ -200,6 +200,7 @@ services:
     volumes:
       - ./config/plex:/config
       - ./data/media:/data/media:rslave
+      - /mnt/torplex:/mnt/zurg:rslave  # Required for symlink resolution
 
 networks:
   torplex_net:
