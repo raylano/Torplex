@@ -91,28 +91,40 @@ class DownloaderOrchestrator:
         
         if preferred_provider:
             if preferred_provider == "real_debrid" and self.real_debrid.is_configured:
-                providers_to_try.append(("real_debrid", self.real_debrid.add_magnet))
+                providers_to_try.append("real_debrid")
             elif preferred_provider == "torbox" and self.torbox.is_configured:
-                providers_to_try.append(("torbox", self.torbox.add_magnet))
+                providers_to_try.append("torbox")
         
         # Add remaining providers as fallback
-        if self.real_debrid.is_configured and ("real_debrid", self.real_debrid.add_magnet) not in providers_to_try:
-            providers_to_try.append(("real_debrid", self.real_debrid.add_magnet))
-        if self.torbox.is_configured and ("torbox", self.torbox.add_magnet) not in providers_to_try:
-            providers_to_try.append(("torbox", self.torbox.add_magnet))
+        if self.real_debrid.is_configured and "real_debrid" not in providers_to_try:
+            providers_to_try.append("real_debrid")
+        if self.torbox.is_configured and "torbox" not in providers_to_try:
+            providers_to_try.append("torbox")
         
-        for provider_name, add_func in providers_to_try:
+        for provider_name in providers_to_try:
             try:
-                result = await add_func(info_hash)
-                if result:
-                    logger.info(f"Added torrent {info_hash[:8]}... to {provider_name}")
-                    return provider_name, str(result)
+                if provider_name == "real_debrid":
+                    # Add magnet
+                    torrent_id = await self.real_debrid.add_magnet(info_hash)
+                    if torrent_id:
+                        # Select all files so download starts automatically
+                        await self.real_debrid.select_files(torrent_id, "all")
+                        logger.info(f"Added torrent {info_hash[:8]}... to {provider_name} (files selected)")
+                        return provider_name, str(torrent_id)
+                        
+                elif provider_name == "torbox":
+                    result = await self.torbox.add_magnet(info_hash)
+                    if result:
+                        logger.info(f"Added torrent {info_hash[:8]}... to {provider_name}")
+                        return provider_name, str(result)
+                        
             except Exception as e:
                 logger.error(f"Failed to add torrent to {provider_name}: {e}")
                 continue
         
         logger.error(f"Failed to add torrent {info_hash[:8]}... to any provider")
         return None, None
+
     
     async def get_best_cached_torrent(
         self,
