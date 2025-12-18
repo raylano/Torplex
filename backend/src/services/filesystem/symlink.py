@@ -54,7 +54,7 @@ class SymlinkService:
         
         return matches[0]
     
-    def find_by_infohash(self, info_hash: str, title: str = None) -> Optional[Path]:
+    def find_by_infohash(self, info_hash: str, title: str = None, year: int = None) -> Optional[Path]:
         """
         Find file by searching in mount.
         First tries to match by info hash, then falls back to title search.
@@ -74,28 +74,29 @@ class SymlinkService:
                         if video_files:
                             return video_files[0]
         
-        # If title provided, search by title
+        # If title provided, search by title (with year for better matching)
         if title:
-            return self.find_by_title(title)
+            return self.find_by_title(title, year)
         
         return None
     
-    def find_by_title(self, title: str) -> Optional[Path]:
+    def find_by_title(self, title: str, year: Optional[int] = None) -> Optional[Path]:
         """
         Find file by searching for title in mount.
-        Uses lenient matching - only needs 1-2 key words.
+        Uses better matching - includes year and more keywords.
         """
         if not title:
             return None
         
-        # Clean title - remove special chars and make lowercase
         import re
+        
+        # Clean title - remove special chars and make lowercase
         clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
         words = clean_title.split()
         
         # Skip common words
         skip_words = {'the', 'a', 'an', 'and', 'of', 'in', 'on', 'at', 'to', 'for', 'is', 'it'}
-        keywords = [w for w in words if w not in skip_words and len(w) > 2][:2]
+        keywords = [w for w in words if w not in skip_words and len(w) > 2]
         
         if not keywords:
             keywords = words[:1] if words else []
@@ -103,7 +104,11 @@ class SymlinkService:
         if not keywords:
             return None
         
-        logger.info(f"Searching mount for: {keywords}")
+        year_str = str(year) if year else None
+        logger.info(f"Searching mount for: {keywords} (year: {year_str})")
+        
+        # Collect all matches with scores
+        matches = []
         
         # Search all subdirs
         for subdir in ["movies", "shows", "anime", "__all__"]:
@@ -115,18 +120,46 @@ class SymlinkService:
                 # Clean item name same way
                 item_name_clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', item.name.lower())
                 
-                # Check if ALL keywords are in the name
-                if all(kw in item_name_clean for kw in keywords):
-                    logger.info(f"Found match: {item.name}")
-                    if item.is_file():
-                        return item
-                    elif item.is_dir():
-                        video_files = self._find_video_files(item)
-                        if video_files:
-                            return video_files[0]
+                # Check if at least first 2 important keywords are present
+                min_keywords = keywords[:2] if len(keywords) > 1 else keywords
+                if not all(kw in item_name_clean for kw in min_keywords):
+                    continue
+                
+                # Calculate match score
+                score = 0
+                
+                # +10 for each keyword match
+                for kw in keywords:
+                    if kw in item_name_clean:
+                        score += 10
+                
+                # +50 for year match (critical for series like Harry Potter)
+                if year_str and year_str in item.name:
+                    score += 50
+                
+                # -20 penalty if year is wrong
+                elif year:
+                    year_match = re.search(r'(19|20)\d{2}', item.name)
+                    if year_match and year_match.group() != year_str:
+                        score -= 20
+                
+                if item.is_file():
+                    matches.append((score, item, None))
+                elif item.is_dir():
+                    video_files = self._find_video_files(item)
+                    if video_files:
+                        matches.append((score, item, video_files[0]))
         
-        logger.warning(f"No match found for keywords: {keywords}")
-        return None
+        if not matches:
+            logger.warning(f"No match found for: {title} ({year})")
+            return None
+        
+        # Sort by score (highest first) and return best match
+        matches.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_folder, best_file = matches[0]
+        
+        logger.info(f"Found match: {best_folder.name} (score: {best_score})")
+        return best_file if best_file else best_folder
 
 
     
