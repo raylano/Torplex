@@ -118,5 +118,3 @@ async def get_provider_status():
         ))
     
     return {"providers": [p.model_dump() for p in providers]}
-</Parameter>
-<parameter name="Complexity">4
