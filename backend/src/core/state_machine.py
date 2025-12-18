@@ -238,8 +238,8 @@ class StateMachine:
             await session.commit()
             return MediaState.FAILED
         
-        # Find file in mount
-        source_path = symlink_service.find_by_infohash(info_hash)
+        # Find file in mount (try by hash first, then title)
+        source_path = symlink_service.find_by_infohash(info_hash, title=item.title)
         
         if not source_path:
             logger.warning(f"File not found in mount for: {item.title}")

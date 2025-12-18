@@ -54,29 +54,71 @@ class SymlinkService:
         
         return matches[0]
     
-    def find_by_infohash(self, info_hash: str) -> Optional[Path]:
+    def find_by_infohash(self, info_hash: str, title: str = None) -> Optional[Path]:
         """
-        Find file by searching for info hash in mount.
-        Zurg organizes files by torrent which often contains the hash.
+        Find file by searching in mount.
+        First tries to match by info hash, then falls back to title search.
         """
-        # Search in typical Zurg structure
+        # First try by hash (rarely works with Zurg)
         for subdir in ["movies", "shows", "anime", "__all__"]:
             search_path = self.mount_path / subdir
             if not search_path.exists():
                 continue
             
-            # Look for directories/files containing the hash
             for item in search_path.iterdir():
                 if info_hash.lower() in item.name.lower():
                     if item.is_file():
                         return item
                     elif item.is_dir():
-                        # Find largest video file in directory
+                        video_files = self._find_video_files(item)
+                        if video_files:
+                            return video_files[0]
+        
+        # If title provided, search by title
+        if title:
+            return self.find_by_title(title)
+        
+        return None
+    
+    def find_by_title(self, title: str) -> Optional[Path]:
+        """
+        Find file by searching for title in mount.
+        Uses fuzzy matching on the first significant words.
+        """
+        if not title:
+            return None
+        
+        # Extract key words from title (first 2-3 significant words)
+        words = title.lower().split()
+        # Skip common words
+        skip_words = {'the', 'a', 'an', 'and', 'of', 'in', 'on', 'at', 'to', 'for'}
+        keywords = [w for w in words if w not in skip_words][:3]
+        
+        if not keywords:
+            keywords = words[:2]
+        
+        logger.debug(f"Searching mount for title keywords: {keywords}")
+        
+        # Search all subdirs
+        for subdir in ["movies", "shows", "anime", "__all__"]:
+            search_path = self.mount_path / subdir
+            if not search_path.exists():
+                continue
+            
+            for item in search_path.iterdir():
+                item_name_lower = item.name.lower()
+                # Check if all keywords are in the name
+                if all(kw in item_name_lower for kw in keywords):
+                    logger.debug(f"Found match: {item}")
+                    if item.is_file():
+                        return item
+                    elif item.is_dir():
                         video_files = self._find_video_files(item)
                         if video_files:
                             return video_files[0]
         
         return None
+
     
     def _find_video_files(self, directory: Path) -> list[Path]:
         """Find video files in directory, sorted by size (largest first)"""
