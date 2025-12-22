@@ -182,31 +182,45 @@ class SymlinkService:
         
         logger.info(f"Searching for S{season:02d}E{episode:02d} in torrent: {torrent_name}")
         
-        # Search in standard mount locations
-        search_paths = [
-            self.mount_path / "__all__" / torrent_name,
-            self.mount_path / "shows" / torrent_name,
-            self.mount_path / "anime" / torrent_name
-        ]
-        
         video_exts = {'.mkv', '.mp4', '.avi', '.mov', '.m4v'}
         found_files = []
-
-        # Collect all video files from potential locations
-        for folder in search_paths:
-            if not folder.exists():
+        
+        # Search in standard mount locations
+        search_locations = ["__all__", "shows", "anime"]
+        
+        for subdir in search_locations:
+            path = self.mount_path / subdir / torrent_name
+            
+            if not path.exists():
                 continue
-                
-            logger.info(f"Checking folder: {folder}")
+            
+            # CASE 1: Single-file torrent - the torrent_name IS the video file
+            if path.is_file():
+                if path.suffix.lower() in video_exts:
+                    logger.info(f"Found single-file torrent: {path.name}")
+                    # Check if this file matches the episode pattern
+                    filename_lower = path.name.lower()
+                    for pattern in patterns:
+                        if re.search(pattern, filename_lower, re.IGNORECASE):
+                            logger.info(f"Single-file match: {path.name}")
+                            return path
+                    # Even if pattern doesn't match exactly, the torrent was selected for this episode
+                    # so return it (the scraper already determined this is the right file)
+                    logger.info(f"Returning single-file torrent (trusted): {path.name}")
+                    return path
+                continue
+            
+            # CASE 2: Multi-file torrent - search inside the folder
+            logger.info(f"Checking folder: {path}")
             try:
-                for video_file in folder.rglob("*"):
+                for video_file in path.rglob("*"):
                     if not video_file.is_file():
                         continue
                     if video_file.suffix.lower() not in video_exts:
                         continue
                     found_files.append(video_file)
             except Exception as e:
-                logger.error(f"Error listing files in {folder}: {e}")
+                logger.error(f"Error listing files in {path}: {e}")
 
         if not found_files:
             logger.warning(f"No video files found in torrent folders for {torrent_name}")
