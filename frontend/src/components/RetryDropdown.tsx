@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { MoreVertical, RefreshCw, Link, FolderOpen, Loader2 } from 'lucide-react'
+import { MoreVertical, RefreshCw, Link, FolderOpen, Loader2, HardDrive } from 'lucide-react'
 
 interface RetryDropdownProps {
     itemId: number
@@ -24,11 +24,19 @@ export default function RetryDropdown({ itemId, itemType, showId, onRetryComplet
                 url = `${API_URL}/api/library/${showId}/episodes/${itemId}/retry`
             } else if (itemType === 'show' && mode === 'all-episodes') {
                 url = `${API_URL}/api/library/${itemId}/retry-all-episodes?mode=failed`
+            } else if (itemType === 'show' && mode === 'rescan-mount') {
+                url = `${API_URL}/api/library/${itemId}/rescan-mount`
             } else {
                 url = `${API_URL}/api/library/${itemId}/retry?mode=${mode}`
             }
 
-            await fetch(url, { method: 'POST' })
+            const response = await fetch(url, { method: 'POST' })
+            const data = await response.json()
+
+            if (mode === 'rescan-mount' && data.message) {
+                alert(data.message)
+            }
+
             onRetryComplete?.()
         } catch (error) {
             console.error('Retry failed:', error)
@@ -40,6 +48,7 @@ export default function RetryDropdown({ itemId, itemType, showId, onRetryComplet
 
     const menuItems = itemType === 'show'
         ? [
+            { key: 'rescan-mount', label: 'Rescan Mount', icon: HardDrive },
             { key: 'all-episodes', label: 'Retry Failed Episodes', icon: RefreshCw },
             { key: 'force', label: 'Force Retry All', icon: RefreshCw },
         ]

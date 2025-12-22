@@ -494,3 +494,55 @@ async def retry_all_episodes(
     return {"message": f"Retry queued for {count} episodes", "count": count}
 
 
+@router.post("/library/{item_id}/rescan-mount")
+async def rescan_mount(
+    item_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Rescan the mount for existing episode files.
+    Updates episodes from REQUESTED/FAILED to DOWNLOADED if files are found.
+    """
+    from src.services.filesystem.mount_scanner import mount_scanner
+    
+    # Verify show exists
+    show_result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
+    show = show_result.scalar_one_or_none()
+    
+    if not show:
+        raise HTTPException(status_code=404, detail="Show not found")
+    
+    if show.type not in [MediaType.SHOW, MediaType.ANIME_SHOW]:
+        raise HTTPException(status_code=400, detail="Not a TV show")
+    
+    # Check mount availability
+    if not mount_scanner.check_mount_available():
+        raise HTTPException(status_code=503, detail="Mount not available")
+    
+    # Scan mount for existing files
+    existing_files = mount_scanner.find_all_episodes_for_show(show.title)
+    
+    if not existing_files:
+        return {"message": "No existing files found in mount", "found": 0, "updated": 0}
+    
+    # Get all episodes for this show
+    result = await db.execute(select(Episode).where(Episode.show_id == item_id))
+    episodes = result.scalars().all()
+    
+    updated = 0
+    for ep in episodes:
+        key = (ep.season_number, ep.episode_number)
+        file_path = existing_files.get(key)
+        
+        if file_path and ep.state in [MediaState.REQUESTED, MediaState.FAILED]:
+            ep.state = MediaState.DOWNLOADED
+            ep.file_path = str(file_path)
+            updated += 1
+    
+    await db.commit()
+    
+    return {
+        "message": f"Mount scan complete: found {len(existing_files)} files, updated {updated} episodes",
+        "found": len(existing_files),
+        "updated": updated
+    }
