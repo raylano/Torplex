@@ -50,10 +50,10 @@ async def process_pending_items():
                 if is_tv_show and item.state == MediaState.INDEXED:
                     # Create episode records for this show
                     await episode_processor.create_episodes_for_show(item, session)
-                    # Mark show as completed (episodes will process individually)
-                    item.state = MediaState.COMPLETED
+                    # Keep show in INDEXED state - show_status is computed from episodes
+                    # Don't mark as COMPLETED prematurely!
                     await session.commit()
-                    logger.info(f"TV Show {item.title} indexed, episodes created")
+                    logger.info(f"TV Show {item.title} indexed, episodes created - status will update as episodes complete")
                     continue
                 
                 # For movies, process normally

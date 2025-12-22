@@ -19,6 +19,16 @@ class MediaType(str, Enum):
     ANIME_SHOW = "anime_show"
 
 
+class ShowStatus(str, Enum):
+    """Aggregate status for TV shows based on episode states"""
+    PENDING = "pending"        # No episodes processed yet
+    DOWNLOADING = "downloading" # Actively processing episodes
+    PARTIAL = "partial"        # Some done, some failed/missing
+    COMPLETED = "completed"    # All episodes symlinked
+    RUNNING = "running"        # Complete but show still airing
+    FAILED = "failed"          # All episodes failed
+
+
 class MediaState(str, Enum):
     """State in the processing pipeline"""
     REQUESTED = "requested"      # Added to queue
@@ -67,6 +77,7 @@ class MediaItem(Base):
     number_of_seasons: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     number_of_episodes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g., "Returning Series"
+    is_airing: Mapped[bool] = mapped_column(Boolean, default=False)  # True if show still releasing episodes
     
     # Processing info
     file_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
@@ -99,6 +110,46 @@ class MediaItem(Base):
         if self.backdrop_path:
             return f"https://image.tmdb.org/t/p/w1280{self.backdrop_path}"
         return None
+    
+    def compute_show_status(self) -> str:
+        """
+        Calculate aggregate show status from episode states.
+        Only applicable for TV shows.
+        """
+        if self.type not in [MediaType.SHOW, MediaType.ANIME_SHOW]:
+            return self.state.value if self.state else "unknown"
+        
+        if not self.episodes:
+            return ShowStatus.PENDING.value
+        
+        completed = sum(1 for e in self.episodes if e.state == MediaState.COMPLETED)
+        failed = sum(1 for e in self.episodes if e.state == MediaState.FAILED)
+        total = len(self.episodes)
+        
+        if completed == total:
+            return ShowStatus.RUNNING.value if self.is_airing else ShowStatus.COMPLETED.value
+        elif completed > 0:
+            return ShowStatus.PARTIAL.value
+        elif failed == total:
+            return ShowStatus.FAILED.value
+        else:
+            return ShowStatus.DOWNLOADING.value
+    
+    def get_episode_stats(self) -> dict:
+        """Get episode statistics for API responses"""
+        if not self.episodes:
+            return {"total": 0, "completed": 0, "failed": 0, "pending": 0}
+        
+        completed = sum(1 for e in self.episodes if e.state == MediaState.COMPLETED)
+        failed = sum(1 for e in self.episodes if e.state == MediaState.FAILED)
+        pending = sum(1 for e in self.episodes if e.state not in [MediaState.COMPLETED, MediaState.FAILED])
+        
+        return {
+            "total": len(self.episodes),
+            "completed": completed,
+            "failed": failed,
+            "pending": pending
+        }
 
 
 class Episode(Base):

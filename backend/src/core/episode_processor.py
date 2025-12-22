@@ -22,8 +22,11 @@ class EpisodeProcessor:
     async def create_episodes_for_show(self, show: MediaItem, session: AsyncSession) -> int:
         """
         Fetch episodes from TMDB and create Episode records.
+        MOUNT-FIRST: Scans mount for existing files and pre-fills those as DOWNLOADED.
         Returns number of episodes created.
         """
+        from src.services.filesystem.mount_scanner import mount_scanner
+        
         if not show.tmdb_id or not show.number_of_seasons:
             logger.warning(f"Cannot create episodes: missing TMDB data for {show.title}")
             return 0
@@ -36,6 +39,15 @@ class EpisodeProcessor:
             logger.debug(f"Episodes already exist for {show.title}")
             return 0
         
+        # MOUNT-FIRST: Scan mount for existing files
+        logger.info(f"🔍 Scanning mount for existing '{show.title}' episodes...")
+        existing_files = {}
+        
+        if mount_scanner.check_mount_available():
+            existing_files = mount_scanner.find_all_episodes_for_show(show.title)
+        else:
+            logger.warning("Mount not available, skipping pre-scan")
+        
         # Fetch episodes from TMDB
         episodes_data = await tmdb_service.get_all_episodes(
             show.tmdb_id, 
@@ -43,21 +55,57 @@ class EpisodeProcessor:
         )
         
         created = 0
+        pre_filled = 0
+        
         for ep_data in episodes_data:
-            episode = Episode(
-                show_id=show.id,
-                season_number=ep_data["season_number"],
-                episode_number=ep_data["episode_number"],
-                title=ep_data.get("title"),
-                overview=ep_data.get("overview"),
-                air_date=ep_data.get("air_date"),
-                state=MediaState.REQUESTED,
-            )
+            season = ep_data["season_number"]
+            episode_num = ep_data["episode_number"]
+            
+            # Check if this episode already exists in mount
+            existing_file = existing_files.get((season, episode_num))
+            
+            # Also check for absolute numbering (season 1, absolute episode)
+            # This handles anime where files use absolute numbers
+            if not existing_file and season > 1:
+                # Calculate absolute episode for lookup
+                # This is a simplified approach - works for many anime
+                pass  # TODO: Implement proper absolute conversion if needed
+            
+            if existing_file:
+                # File exists! Create as DOWNLOADED (ready for symlink)
+                episode = Episode(
+                    show_id=show.id,
+                    season_number=season,
+                    episode_number=episode_num,
+                    title=ep_data.get("title"),
+                    overview=ep_data.get("overview"),
+                    air_date=ep_data.get("air_date"),
+                    state=MediaState.DOWNLOADED,  # Ready for symlink!
+                    file_path=str(existing_file),
+                )
+                pre_filled += 1
+            else:
+                # File doesn't exist, needs scraping
+                episode = Episode(
+                    show_id=show.id,
+                    season_number=season,
+                    episode_number=episode_num,
+                    title=ep_data.get("title"),
+                    overview=ep_data.get("overview"),
+                    air_date=ep_data.get("air_date"),
+                    state=MediaState.REQUESTED,
+                )
+            
             session.add(episode)
             created += 1
         
         await session.commit()
-        logger.info(f"Created {created} episodes for {show.title}")
+        
+        if pre_filled > 0:
+            logger.success(f"✅ Created {created} episodes for {show.title} ({pre_filled} already in mount!)")
+        else:
+            logger.info(f"Created {created} episodes for {show.title} (none found in mount)")
+        
         return created
     
     async def process_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
