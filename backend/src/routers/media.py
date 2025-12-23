@@ -269,7 +269,7 @@ async def retry_media_item(
 ):
     """
     Retry a media item with different modes:
-    - force: Restart from beginning (REQUESTED state)
+    - force: Full reset - deletes episodes, clears all cached data, restarts from REQUESTED
     - symlink: Only retry symlink creation (DOWNLOADED state)
     """
     result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
@@ -278,16 +278,41 @@ async def retry_media_item(
     if not item:
         raise HTTPException(status_code=404, detail="Media item not found")
     
+    deleted_episodes = 0
+    
     if mode == "symlink":
+        # Only reset symlink state
         item.state = MediaState.DOWNLOADED
-    else:  # force
+        item.last_error = None
+        item.retry_count = 0
+    else:  # force - complete reset
+        # For TV shows, delete all episodes so they get re-created
+        is_show = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
+        
+        if is_show:
+            ep_result = await db.execute(
+                select(Episode).where(Episode.show_id == item_id)
+            )
+            episodes = ep_result.scalars().all()
+            for ep in episodes:
+                await db.delete(ep)
+            deleted_episodes = len(episodes)
+        
+        # Clear all cached data so everything gets re-fetched
+        item.alternative_titles = None  # Will be re-fetched from TMDB
+        item.file_path = None
+        item.symlink_path = None
+        item.last_error = None
+        item.retry_count = 0
         item.state = MediaState.REQUESTED
     
-    item.last_error = None
-    item.retry_count = 0
     await db.commit()
     
-    return {"message": f"Retry ({mode}) queued", "id": item_id, "new_state": item.state.value}
+    msg = f"Retry ({mode}) queued"
+    if mode == "force" and deleted_episodes > 0:
+        msg += f" - deleted {deleted_episodes} episodes for full re-index"
+    
+    return {"message": msg, "id": item_id, "new_state": item.state.value}
 
 
 @router.get("/library/{item_id}/mount-files")
