@@ -59,6 +59,7 @@ class MediaItem(Base):
     # Basic Info
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     original_title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    alternative_titles: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON list of aliases
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
     # Type & State

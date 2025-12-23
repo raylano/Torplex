@@ -66,11 +66,12 @@ class QualityRanker:
         (r"MP3", 20),
     ]
     
-    # Anime-specific patterns worth bonus points
+    # Anime-specific patterns worth bonus points (higher = more preferred)
     ANIME_BONUSES = {
-        "dual_audio": 1000,
-        "dubbed": 500,
-        "subbed": 100,  # Slightly prefer subbed over nothing
+        "dual_audio": 2000,     # Dual audio = best (English + Japanese)
+        "english_audio": 1500,  # Explicitly English dubbed
+        "dubbed": 1000,         # Generic "dubbed" marker
+        "subbed": 100,          # Subbed only (least preferred)
     }
     
     # Preferred release groups for anime
@@ -181,12 +182,23 @@ class QualityRanker:
         if has_foreign_only and not has_english:
             score.total -= 500  # Penalize foreign-only releases
         
-        # Anime bonuses
+        # Anime bonuses - strongly prefer English audio
         if is_anime:
             if torrent.is_dual_audio:
                 score.total += self.ANIME_BONUSES["dual_audio"]
             elif torrent.is_dubbed:
                 score.total += self.ANIME_BONUSES["dubbed"]
+            else:
+                # Check for explicit English audio markers in title
+                english_markers = ['english dub', 'eng dub', 'english audio', 'english dubbed', 
+                                   'dub[', 'dubbed', 'english]', '[eng]', '(eng)', 'english.dub']
+                if any(marker in title_lower for marker in english_markers):
+                    score.total += self.ANIME_BONUSES["english_audio"]
+            
+            # Penalty for Japanese-only releases when user prefers English
+            japanese_only_markers = ['raw', 'japanese only', 'jap only', 'no subs', 'raws', '[raw]']
+            if any(marker in title_lower for marker in japanese_only_markers):
+                score.total -= 800  # Strong penalty for raw/Japanese-only
             
             # Prefer known good anime groups
             if torrent.release_group:

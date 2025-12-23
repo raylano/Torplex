@@ -228,12 +228,15 @@ class EpisodeProcessor:
                 episode.episode_number
             )
         
-        # Second try: Episode-specific search in __all__ folder
+        # Second try: Episode-specific search in __all__ folder (with alternative titles)
         if not source_path:
+            import json
+            alt_titles = json.loads(show.alternative_titles or "[]") if show.alternative_titles else []
             source_path = symlink_service.find_episode(
                 show.title,
                 episode.season_number,
-                episode.episode_number
+                episode.episode_number,
+                alternative_titles=alt_titles
             )
         
         if not source_path:

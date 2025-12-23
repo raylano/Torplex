@@ -108,6 +108,10 @@ class StateMachine:
             metadata = tmdb_service.extract_metadata(full_data, media_type)
             self._apply_metadata(item, metadata)
             
+            # Fetch alternative titles for better episode matching
+            alt_titles = await tmdb_service.get_alternative_titles(tmdb_id, media_type)
+            await self._store_alternative_titles(item, alt_titles)
+            
             # Log for debugging
             if is_tv:
                 logger.info(f"TV Show {item.title}: {item.number_of_seasons} seasons, {item.number_of_episodes} episodes")
@@ -146,6 +150,26 @@ class StateMachine:
             elif item.type == MediaType.SHOW:
                 item.type = MediaType.ANIME_SHOW
             item.is_anime = True
+    
+    async def _store_alternative_titles(self, item: MediaItem, alt_titles: list):
+        """Store alternative titles for episode matching"""
+        import json
+        
+        # Build complete list of searchable titles
+        all_titles = []
+        
+        # Include original title (e.g., "Boku no Hero Academia")
+        if item.original_title and item.original_title != item.title:
+            all_titles.append(item.original_title)
+        
+        # Include TMDB alternative titles
+        for title in alt_titles:
+            if title and title not in all_titles and title != item.title:
+                all_titles.append(title)
+        
+        if all_titles:
+            item.alternative_titles = json.dumps(all_titles)
+            logger.info(f"Stored {len(all_titles)} alternative titles for {item.title}")
     
     async def _scrape_item(self, item: MediaItem, session: AsyncSession) -> MediaState:
         """Scrape for torrents"""

@@ -239,12 +239,19 @@ class SymlinkService:
         logger.debug(f"Episode S{season:02d}E{episode:02d} not found in {torrent_name}")
         return None
     
-    def find_episode(self, show_title: str, season: int, episode: int) -> Optional[Path]:
+    def find_episode(self, show_title: str, season: int, episode: int, 
+                     alternative_titles: list = None) -> Optional[Path]:
         """
         Find a specific episode file in the mount.
         Searches for S01E01/s01e01/1x01 patterns.
+        Uses alternative titles for better matching.
         """
         import re
+        
+        # Build list of all titles to try
+        titles_to_try = [show_title]
+        if alternative_titles:
+            titles_to_try.extend(alternative_titles)
         
         # Patterns to match episode numbers (case insensitive)
         patterns = [
@@ -255,13 +262,12 @@ class SymlinkService:
             # Anime/Absolute specific patterns
             rf'(?:e|ep|episode)\.?\s*0*{episode:02d}', # Episode 001, Episode 01
             rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", "[01]"
+            rf' - 0*{episode}(?:\s|\.|$)',        # " - 01 " common in anime
         ]
         
-        # Clean show title for matching
-        clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', show_title.lower())
-        title_words = [w for w in clean_title.split() if len(w) > 2][:3]
-        
         logger.info(f"Searching for episode: {show_title} S{season:02d}E{episode:02d}")
+        if alternative_titles:
+            logger.debug(f"Also trying alternative titles: {alternative_titles[:3]}...")
         
         matches = []
         
@@ -274,19 +280,21 @@ class SymlinkService:
                 item_name_lower = item.name.lower()
                 clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
                 
-                # Check if show title matches (at least first 2 keywords)
-                # This is critical for Season packs -> "Attack on Titan Season 1" matches title, then we look inside
+                # Check if ANY of our titles matches the folder/file
                 title_match = False
-                if title_words:
-                    if all(w in clean_item for w in title_words): # Require all keywords (up to 3) for safety to avoid false positives
-                        title_match = True
-                else:
-                    # No keywords (short title) - fuzzy match whole clean title
-                    if clean_title in clean_item:
-                        title_match = True
+                for title in titles_to_try:
+                    clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
+                    title_words = [w for w in clean_title.split() if len(w) > 2][:3]
+                    
+                    if title_words:
+                        if all(w in clean_item for w in title_words):
+                            title_match = True
+                            break
+                    else:
+                        if clean_title in clean_item:
+                            title_match = True
+                            break
 
-                # If the folder/file doesn't even contain the show name, skip it
-                # (Unless it's a generic "S01E01" file in root, but that's rare/risky in __all__)
                 if not title_match:
                     continue
 
@@ -298,17 +306,13 @@ class SymlinkService:
                             break
                             
                 elif item.is_dir():
-                    # For directories matching the show title, looks for video files inside matching episode regex
                     try:
-                        # Optimization: if directory is "Show Name Season X", only checking files if season matches? 
-                        # No, just check all video files, it's safer for absolute numbering
                         video_files = self._find_video_files(item)
                         for vf in video_files:
                             vf_name_lower = vf.name.lower()
                             for pattern in patterns:
                                 if re.search(pattern, vf_name_lower, re.IGNORECASE):
                                     matches.append(vf)
-                                    # Found match in this folder, but don't break, maybe better quality exists?
                                     break
                     except Exception as e:
                         logger.error(f"Error scanning folder {item}: {e}")

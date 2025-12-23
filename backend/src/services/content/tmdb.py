@@ -114,6 +114,26 @@ class TMDBService:
         logger.info(f"TMDB: Fetched {len(all_episodes)} episodes for show {tmdb_id}")
         return all_episodes
 
+    async def get_alternative_titles(self, tmdb_id: int, media_type: str = "tv") -> List[str]:
+        """
+        Fetch all alternative titles for a show/movie from TMDB.
+        Includes original title and all international titles.
+        """
+        endpoint = f"/{media_type}/{tmdb_id}/alternative_titles"
+        result = await self._request(endpoint)
+        
+        titles = []
+        if result:
+            # TV shows use "results", movies use "titles"
+            title_list = result.get("results", []) or result.get("titles", [])
+            for entry in title_list:
+                title = entry.get("title")
+                if title:
+                    titles.append(title)
+        
+        logger.debug(f"TMDB: Found {len(titles)} alternative titles for {media_type}/{tmdb_id}")
+        return titles
+
     
     def is_anime(self, data: Dict) -> bool:
         """
