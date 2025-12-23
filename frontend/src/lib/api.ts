@@ -160,6 +160,17 @@ export const api = {
         })
     },
 
+    async retryAllMedia() {
+        return fetchAPI<{
+            message: string;
+            items_reset: number;
+            episodes_deleted: number;
+            symlinks_deleted: number
+        }>('/api/library/retry-all', {
+            method: 'POST',
+        })
+    },
+
     // Search
     async search(query: string, type?: 'movie' | 'tv' | 'all') {
         const params = new URLSearchParams({ query })

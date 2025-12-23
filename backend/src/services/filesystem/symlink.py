@@ -253,16 +253,20 @@ class SymlinkService:
         if alternative_titles:
             titles_to_try.extend(alternative_titles)
         
-        # Patterns to match episode numbers (case insensitive)
-        patterns = [
-            rf's{season:02d}e{episode:02d}',      # S01E01
-            rf's{season}e{episode}',              # S1E1
-            rf'{season}x{episode:02d}',           # 1x01
-            rf'season\s*{season}.*episode\s*{episode}',  # Season 1 Episode 1
-            # Anime/Absolute specific patterns
-            rf'(?:e|ep|episode)\.?\s*0*{episode:02d}', # Episode 001, Episode 01
-            rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", "[01]"
-            rf' - 0*{episode}(?:\s|\.|$)',        # " - 01 " common in anime
+        # STRICT patterns - must match EXACT season AND episode
+        # This prevents S04E18 from matching S02E18 files!
+        strict_patterns = [
+            rf's0*{season}e0*{episode}\b',        # S04E18, S4E18, S04E018 etc
+            rf'{season}x{episode:02d}\b',         # 4x18
+            rf'season\s*{season}[^0-9]+episode\s*{episode}\b',  # Season 4 Episode 18
+        ]
+        
+        # Fallback patterns for anime (only use if folder clearly matches season)
+        # These patterns only match episode number, so require extra validation
+        anime_patterns = [
+            rf'(?:e|ep|episode)\.?\s*0*{episode}\b', # Episode 018, Episode 18
+            rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone: " 018 ", "[18]"
+            rf' - 0*{episode}(?:\s|\.|$)',        # " - 18 " common in anime
         ]
         
         logger.info(f"Searching for episode: {show_title} S{season:02d}E{episode:02d}")
@@ -298,22 +302,20 @@ class SymlinkService:
                 if not title_match:
                     continue
 
+                # Check if folder indicates a specific season (for anime patterns validation)
+                folder_season = self._extract_season_from_name(item_name_lower)
+                
                 # Now check for episode match
                 if item.is_file():
-                    for pattern in patterns:
-                        if re.search(pattern, item_name_lower, re.IGNORECASE):
-                            matches.append(item)
-                            break
+                    if self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season):
+                        matches.append(item)
                             
                 elif item.is_dir():
                     try:
                         video_files = self._find_video_files(item)
                         for vf in video_files:
-                            vf_name_lower = vf.name.lower()
-                            for pattern in patterns:
-                                if re.search(pattern, vf_name_lower, re.IGNORECASE):
-                                    matches.append(vf)
-                                    break
+                            if self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season):
+                                matches.append(vf)
                     except Exception as e:
                         logger.error(f"Error scanning folder {item}: {e}")
         
@@ -339,6 +341,124 @@ class SymlinkService:
         video_files.sort(key=lambda p: p.stat().st_size, reverse=True)
         
         return video_files
+    
+    def _extract_season_from_name(self, name: str) -> Optional[int]:
+        """Extract season number from folder/file name, if present"""
+        import re
+        name_lower = name.lower()
+        
+        # "Season 2", "Season 02", "S02", "S2"
+        match = re.search(r'season\s*0*(\d+)', name_lower)
+        if match:
+            return int(match.group(1))
+        
+        match = re.search(r'\bs0*(\d+)(?!e)', name_lower)  # S02 but not S02E01
+        if match:
+            return int(match.group(1))
+        
+        return None
+    
+    def _file_matches_episode(self, filename: str, target_season: int, target_episode: int,
+                               strict_patterns: list, anime_patterns: list, 
+                               folder_season: Optional[int]) -> bool:
+        """
+        Check if a filename matches the target season and episode.
+        Uses strict patterns first, then anime patterns with season validation.
+        """
+        import re
+        filename_lower = filename.lower()
+        
+        # First try strict patterns (they include season, so no extra check needed)
+        for pattern in strict_patterns:
+            if re.search(pattern, filename_lower, re.IGNORECASE):
+                return True
+        
+        # For anime patterns, we need to validate the season separately
+        # because these patterns only match episode number
+        for pattern in anime_patterns:
+            if re.search(pattern, filename_lower, re.IGNORECASE):
+                # Check if file explicitly has wrong season
+                file_season = self._extract_season_from_filename(filename_lower)
+                if file_season is not None:
+                    # File has explicit season - must match!
+                    if file_season == target_season:
+                        return True
+                    else:
+                        continue  # Wrong season, skip this file
+                
+                # No explicit season in file - use folder season if available
+                if folder_season is not None:
+                    if folder_season == target_season:
+                        return True
+                    else:
+                        continue  # Folder is for wrong season
+                
+                # No season info anywhere - only match for season 1
+                if target_season == 1:
+                    return True
+        
+        return False
+    
+    def _extract_season_from_filename(self, filename: str) -> Optional[int]:
+        """Extract season from filename if explicitly present like S02E01"""
+        import re
+        match = re.search(r's0*(\d+)e\d+', filename.lower())
+        if match:
+            return int(match.group(1))
+        
+        match = re.search(r'(\d+)x\d+', filename.lower())
+        if match:
+            return int(match.group(1))
+        
+        return None
+    
+    def delete_symlinks_for_item(self, media_item: MediaItem) -> int:
+        """
+        Delete all symlinks created for a media item.
+        Returns the number of deleted symlinks.
+        """
+        deleted_count = 0
+        
+        try:
+            # Determine the directory where symlinks would be created
+            dest_dir = self.paths.get(media_item.type, self.paths[MediaType.MOVIE])
+            clean_name = self._clean_filename(media_item.title)
+            
+            # For movies, delete the single symlink
+            if media_item.type in [MediaType.MOVIE, MediaType.ANIME_MOVIE]:
+                for ext in ['.mkv', '.mp4', '.avi', '.mov', '.m4v']:
+                    if media_item.year:
+                        symlink_path = dest_dir / f"{clean_name} ({media_item.year}){ext}"
+                    else:
+                        symlink_path = dest_dir / f"{clean_name}{ext}"
+                    
+                    if symlink_path.exists() and symlink_path.is_symlink():
+                        symlink_path.unlink()
+                        deleted_count += 1
+                        logger.info(f"Deleted symlink: {symlink_path}")
+            
+            # For TV shows, delete the entire show folder
+            else:
+                if media_item.year:
+                    show_folder = dest_dir / f"{clean_name} ({media_item.year})"
+                else:
+                    show_folder = dest_dir / clean_name
+                
+                if show_folder.exists():
+                    import shutil
+                    # Count symlinks before deletion
+                    for f in show_folder.rglob("*"):
+                        if f.is_symlink():
+                            deleted_count += 1
+                    
+                    shutil.rmtree(show_folder)
+                    logger.info(f"Deleted show folder with {deleted_count} symlinks: {show_folder}")
+        
+        except Exception as e:
+            logger.error(f"Error deleting symlinks for {media_item.title}: {e}")
+        
+        return deleted_count
+
     
     def create_symlink(
         self,

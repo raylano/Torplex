@@ -9,7 +9,8 @@ import {
     AlertCircle,
     HardDrive,
     Activity,
-    TrendingUp
+    TrendingUp,
+    RefreshCw
 } from 'lucide-react'
 import { api, Stats, MediaItem } from '@/lib/api'
 import MediaCard from '@/components/MediaCard'
@@ -18,6 +19,8 @@ export default function Dashboard() {
     const [stats, setStats] = useState<Stats | null>(null)
     const [recentItems, setRecentItems] = useState<MediaItem[]>([])
     const [loading, setLoading] = useState(true)
+    const [showResetConfirm, setShowResetConfirm] = useState(false)
+    const [resetting, setResetting] = useState(false)
 
     useEffect(() => {
         async function fetchData() {
@@ -36,6 +39,22 @@ export default function Dashboard() {
         }
         fetchData()
     }, [])
+
+    const handleResetAll = async () => {
+        setResetting(true)
+        try {
+            const result = await api.retryAllMedia()
+            alert(`✅ ${result.message}`)
+            // Refresh the page data
+            window.location.reload()
+        } catch (error) {
+            console.error('Reset failed:', error)
+            alert('❌ Reset failed. Check console for details.')
+        } finally {
+            setResetting(false)
+            setShowResetConfirm(false)
+        }
+    }
 
     if (loading) {
         return (
@@ -87,6 +106,14 @@ export default function Dashboard() {
                     <p className="text-gray-400 mt-1">Welcome to Torplex</p>
                 </div>
                 <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => setShowResetConfirm(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg glass text-orange-400 hover:bg-orange-500/20 transition-colors"
+                        title="Reset all media items and re-process"
+                    >
+                        <RefreshCw size={18} />
+                        <span className="text-sm font-medium">Reset All</span>
+                    </button>
                     <div className={`flex items-center gap-2 px-4 py-2 rounded-lg glass ${stats?.mount_status ? 'text-green-400' : 'text-red-400'
                         }`}>
                         <HardDrive size={18} />
@@ -96,6 +123,45 @@ export default function Dashboard() {
                     </div>
                 </div>
             </div>
+
+            {/* Reset Confirmation Modal */}
+            {showResetConfirm && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="glass rounded-2xl p-6 max-w-md mx-4">
+                        <h3 className="text-xl font-bold text-red-400 mb-4">⚠️ Reset All Media?</h3>
+                        <p className="text-gray-300 mb-4">
+                            This will:
+                        </p>
+                        <ul className="text-gray-400 text-sm mb-6 space-y-2">
+                            <li>• Delete all existing symlinks</li>
+                            <li>• Delete all episode records</li>
+                            <li>• Re-fetch metadata from TMDB</li>
+                            <li>• Re-process everything from scratch</li>
+                        </ul>
+                        <div className="flex gap-4">
+                            <button
+                                onClick={() => setShowResetConfirm(false)}
+                                className="flex-1 px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 transition-colors"
+                                disabled={resetting}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleResetAll}
+                                className="flex-1 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition-colors flex items-center justify-center gap-2"
+                                disabled={resetting}
+                            >
+                                {resetting ? (
+                                    <RefreshCw className="animate-spin" size={18} />
+                                ) : (
+                                    <RefreshCw size={18} />
+                                )}
+                                {resetting ? 'Resetting...' : 'Reset All'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

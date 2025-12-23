@@ -26,7 +26,11 @@ class MountScanner:
         clean_title = self._normalize_title(show_title)
         
         # Get first few words for matching (handles "One Piece" matching "[AnimeRG] One Piece...")
-        title_words = clean_title.split()[:3]  # First 3 words
+        title_words = [w for w in clean_title.split() if len(w) > 1][:4]  # First 4 significant words
+        
+        # Require at least 2 words to match to prevent false positives
+        # This prevents "Nature.S01E01" from matching "Dan Da Dan" just because of "Dan"
+        min_words_required = min(2, len(title_words))
         
         for subdir in ["__all__", "anime", "shows"]:
             search_path = self.mount_path / subdir
@@ -40,10 +44,13 @@ class MountScanner:
                     
                     item_clean = self._normalize_title(item.name)
                     
-                    # Check if all title words appear in folder name
-                    if all(word in item_clean for word in title_words):
+                    # Count how many title words appear in folder name
+                    matching_words = sum(1 for word in title_words if word in item_clean)
+                    
+                    # Need at least min_words_required matches
+                    if matching_words >= min_words_required:
                         folders.append(item)
-                        logger.debug(f"Matched folder: {item.name}")
+                        logger.debug(f"Matched folder: {item.name} ({matching_words}/{len(title_words)} words)")
             except Exception as e:
                 logger.error(f"Error scanning {search_path}: {e}")
         

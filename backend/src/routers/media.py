@@ -269,9 +269,11 @@ async def retry_media_item(
 ):
     """
     Retry a media item with different modes:
-    - force: Full reset - deletes episodes, clears all cached data, restarts from REQUESTED
+    - force: Full reset - deletes episodes, symlinks, clears all cached data, restarts from REQUESTED
     - symlink: Only retry symlink creation (DOWNLOADED state)
     """
+    from src.services.filesystem import symlink_service
+    
     result = await db.execute(select(MediaItem).where(MediaItem.id == item_id))
     item = result.scalar_one_or_none()
     
@@ -279,6 +281,7 @@ async def retry_media_item(
         raise HTTPException(status_code=404, detail="Media item not found")
     
     deleted_episodes = 0
+    deleted_symlinks = 0
     
     if mode == "symlink":
         # Only reset symlink state
@@ -286,6 +289,9 @@ async def retry_media_item(
         item.last_error = None
         item.retry_count = 0
     else:  # force - complete reset
+        # First, delete physical symlinks
+        deleted_symlinks = symlink_service.delete_symlinks_for_item(item)
+        
         # For TV shows, delete all episodes so they get re-created
         is_show = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
         
@@ -309,10 +315,65 @@ async def retry_media_item(
     await db.commit()
     
     msg = f"Retry ({mode}) queued"
-    if mode == "force" and deleted_episodes > 0:
-        msg += f" - deleted {deleted_episodes} episodes for full re-index"
+    if mode == "force":
+        if deleted_episodes > 0:
+            msg += f" - deleted {deleted_episodes} episodes"
+        if deleted_symlinks > 0:
+            msg += f", {deleted_symlinks} symlinks"
     
     return {"message": msg, "id": item_id, "new_state": item.state.value}
+
+
+@router.post("/library/retry-all")
+async def retry_all_media_items(
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Force retry ALL media items.
+    Deletes all episodes, symlinks, and resets everything to REQUESTED state.
+    Use with caution!
+    """
+    from src.services.filesystem import symlink_service
+    
+    result = await db.execute(select(MediaItem))
+    items = result.scalars().all()
+    
+    total_items = 0
+    total_episodes = 0
+    total_symlinks = 0
+    
+    for item in items:
+        # Delete symlinks
+        deleted_symlinks = symlink_service.delete_symlinks_for_item(item)
+        total_symlinks += deleted_symlinks
+        
+        # Delete episodes for TV shows
+        if item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]:
+            ep_result = await db.execute(
+                select(Episode).where(Episode.show_id == item.id)
+            )
+            episodes = ep_result.scalars().all()
+            for ep in episodes:
+                await db.delete(ep)
+            total_episodes += len(episodes)
+        
+        # Reset item
+        item.alternative_titles = None
+        item.file_path = None
+        item.symlink_path = None
+        item.last_error = None
+        item.retry_count = 0
+        item.state = MediaState.REQUESTED
+        total_items += 1
+    
+    await db.commit()
+    
+    return {
+        "message": f"Reset {total_items} items, deleted {total_episodes} episodes and {total_symlinks} symlinks",
+        "items_reset": total_items,
+        "episodes_deleted": total_episodes,
+        "symlinks_deleted": total_symlinks
+    }
 
 
 @router.get("/library/{item_id}/mount-files")

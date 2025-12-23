@@ -77,35 +77,56 @@ class TorrentioScraper:
         url = f"{self.url}/{self.DEFAULT_FILTER}/stream/series/{imdb_id}:{season}:{episode}.json"
         return await self._fetch_and_parse(url)
     
-    async def _fetch_and_parse(self, url: str) -> List[TorrentResult]:
-        """Fetch streams from Torrentio and parse results"""
-        try:
-            response = await self.client.get(url)
-            
-            if response.status_code == 404:
-                logger.debug(f"No streams found at {url}")
+    async def _fetch_and_parse(self, url: str, max_retries: int = 3) -> List[TorrentResult]:
+        """Fetch streams from Torrentio and parse results, with retry logic for 502 errors"""
+        import asyncio
+        
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.get(url)
+                
+                if response.status_code == 404:
+                    logger.debug(f"No streams found at {url}")
+                    return []
+                
+                # Retry on 502 Bad Gateway
+                if response.status_code == 502:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 3  # 3s, 6s, 9s
+                        logger.warning(f"Torrentio 502 error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"Torrentio 502 error after {max_retries} attempts")
+                        return []
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                streams = data.get("streams", [])
+                results = []
+                
+                for stream in streams:
+                    result = self._parse_stream(stream)
+                    if result:
+                        results.append(result)
+                
+                logger.info(f"Torrentio found {len(results)} streams")
+                return results
+                
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 502 and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3
+                    logger.warning(f"Torrentio HTTP 502, retrying in {wait_time}s")
+                    await asyncio.sleep(wait_time)
+                    continue
+                logger.error(f"Torrentio HTTP error: {e.response.status_code}")
                 return []
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            streams = data.get("streams", [])
-            results = []
-            
-            for stream in streams:
-                result = self._parse_stream(stream)
-                if result:
-                    results.append(result)
-            
-            logger.info(f"Torrentio found {len(results)} streams")
-            return results
-            
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Torrentio HTTP error: {e.response.status_code}")
-            return []
-        except Exception as e:
-            logger.error(f"Torrentio scrape failed: {e}")
-            return []
+            except Exception as e:
+                logger.error(f"Torrentio scrape failed: {e}")
+                return []
+        
+        return []
     
     def _parse_stream(self, stream: Dict) -> Optional[TorrentResult]:
         """Parse a single stream object"""
