@@ -22,6 +22,7 @@ async def process_pending_items():
     """Process all items that need work"""
     async with async_session() as session:
         # Get media items that need processing
+        # Note: TV shows in INDEXED state are handled specially below
         processable_states = [
             MediaState.REQUESTED,
             MediaState.INDEXED,
@@ -49,11 +50,16 @@ async def process_pending_items():
                 
                 if is_tv_show and item.state == MediaState.INDEXED:
                     # Create episode records for this show
-                    await episode_processor.create_episodes_for_show(item, session)
-                    # Keep show in INDEXED state - show_status is computed from episodes
-                    # Don't mark as COMPLETED prematurely!
+                    created = await episode_processor.create_episodes_for_show(item, session)
+                    
+                    if created > 0:
+                        logger.info(f"TV Show {item.title}: created {created} episodes")
+                    
+                    # Move show to COMPLETED - episodes are processed separately
+                    # The show itself is "done" - individual episodes track their own status
+                    item.state = MediaState.COMPLETED
                     await session.commit()
-                    logger.info(f"TV Show {item.title} indexed, episodes created - status will update as episodes complete")
+                    logger.info(f"TV Show {item.title} ready - {created} episodes queued for processing")
                     continue
                 
                 # For movies, process normally
