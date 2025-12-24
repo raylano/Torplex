@@ -341,44 +341,76 @@ class SymlinkService:
             
             for item in search_path.iterdir():
                 item_name_lower = item.name.lower()
-                # Clean for comparison - keep only alphanumeric and spaces
-                clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
-                clean_item_words = set(clean_item.split())
                 
-                # Check if ANY of our titles matches the folder/file
+                # Use PTN to parse folder/file name and extract title
                 title_match = False
-                for title in titles_to_try:
-                    clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
-                    # Use ALL significant words (length > 2), not just first 3!
-                    title_words = [w for w in clean_title.split() if len(w) > 2]
+                extracted_folder_title = None
+                
+                if PTN:
+                    try:
+                        parsed = PTN.parse(item.name)
+                        extracted_folder_title = parsed.get('title', '').lower().strip()
+                    except Exception as e:
+                        logger.debug(f"PTN parse failed for {item.name}: {e}")
+                
+                # Normalize function for comparison
+                def normalize(s):
+                    return re.sub(r'[^a-z0-9\s]', '', s.lower()).strip()
+                
+                if extracted_folder_title:
+                    # PTN extracted a title - use strict comparison
+                    folder_title_norm = normalize(extracted_folder_title)
                     
-                    if not title_words:
-                        # Very short title - require exact containment
-                        if clean_title.strip() in clean_item:
+                    for title in titles_to_try:
+                        title_norm = normalize(title)
+                        
+                        # Exact match
+                        if folder_title_norm == title_norm:
                             title_match = True
+                            logger.debug(f"PTN exact match: '{extracted_folder_title}' == '{title}'")
                             break
-                        continue
-                    
-                    # STRICT: ALL title words must be present in item name
-                    # This prevents "Game of Thrones" matching "The Middle"
-                    if all(w in clean_item_words for w in title_words):
-                        title_match = True
-                        logger.debug(f"Title match (all words): '{title}' matched '{item.name}'")
-                        break
-                    
-                    # Also try: title as contiguous substring (for abbreviated names)
-                    # Example: "MASHLE" should match "MASHLE.MAGIC.AND.MUSCLES"
-                    main_word = title_words[0] if title_words else ""
-                    if len(main_word) > 4 and main_word in clean_item:
-                        # Additional check: make sure this isn't a false positive
-                        # by verifying at least one more word matches (if available)
-                        if len(title_words) == 1:
+                        
+                        # One contains the other (for abbreviated titles like "MASHLE")
+                        if folder_title_norm in title_norm or title_norm in folder_title_norm:
                             title_match = True
-                            logger.debug(f"Title match (single word): '{title}' matched '{item.name}'")
+                            logger.debug(f"PTN substring match: '{extracted_folder_title}' ~ '{title}'")
                             break
-                        elif any(w in clean_item_words for w in title_words[1:]):
+                        
+                        # Significant word overlap (at least 60% of words)
+                        folder_words = set(folder_title_norm.split())
+                        title_words_set = set(title_norm.split())
+                        
+                        # Remove short words (the, of, a, etc)
+                        folder_words = {w for w in folder_words if len(w) > 2}
+                        title_words_set = {w for w in title_words_set if len(w) > 2}
+                        
+                        if folder_words and title_words_set:
+                            common = folder_words & title_words_set
+                            min_words = min(len(folder_words), len(title_words_set))
+                            
+                            if len(common) >= min_words * 0.6:
+                                title_match = True
+                                logger.debug(f"PTN word overlap match: '{extracted_folder_title}' ~ '{title}' (common: {common})")
+                                break
+                else:
+                    # PTN failed - fallback to strict word matching
+                    clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
+                    clean_item_words = set(clean_item.split())
+                    
+                    for title in titles_to_try:
+                        clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
+                        title_words = [w for w in clean_title.split() if len(w) > 2]
+                        
+                        if not title_words:
+                            if clean_title.strip() in clean_item:
+                                title_match = True
+                                break
+                            continue
+                        
+                        # ALL significant title words must be present
+                        if all(w in clean_item_words for w in title_words):
                             title_match = True
-                            logger.debug(f"Title match (main + partial): '{title}' matched '{item.name}'")
+                            logger.debug(f"Word match: all words of '{title}' in '{item.name}'")
                             break
 
                 if not title_match:
