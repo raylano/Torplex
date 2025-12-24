@@ -57,14 +57,22 @@ async def process_pending_items():
                     if created > 0:
                         logger.info(f"TV Show {item_title}: created {created} episodes")
                     
-                    # Move show to COMPLETED - episodes are processed separately
-                    # The show itself is "done" - individual episodes track their own status
-                    item.state = MediaState.COMPLETED
+                    # Move show to SCRAPED state - this takes it out of the INDEXED loop
+                    # The show's actual "completion" status is computed from its episodes
+                    # SCRAPED is safe because TV shows don't go through download/symlink individually
+                    item.state = MediaState.SCRAPED
                     await session.commit()
                     logger.info(f"TV Show {item_title} ready - {created} episodes queued for processing")
                     continue
                 
-                # For movies, process normally
+                # Skip TV shows that are past INDEXED - their episodes are processed separately
+                # Only movies should go through the download/symlink process directly
+                if is_tv_show and item.state in [MediaState.SCRAPED, MediaState.DOWNLOADING, 
+                                                  MediaState.DOWNLOADED, MediaState.SYMLINKED]:
+                    logger.debug(f"Skipping TV show {item_title} in {item.state} - episodes process separately")
+                    continue
+                
+                # For movies (and rare edge cases), process normally
                 new_state = await state_machine.process_item(item, session)
                 logger.debug(f"{item_title}: {item.state} -> {new_state}")
                 
