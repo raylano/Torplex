@@ -285,20 +285,40 @@ class SymlinkService:
             
             for item in search_path.iterdir():
                 item_name_lower = item.name.lower()
+                # Clean for comparison - keep only alphanumeric and spaces
                 clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
+                clean_item_words = set(clean_item.split())
                 
                 # Check if ANY of our titles matches the folder/file
                 title_match = False
                 for title in titles_to_try:
                     clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
-                    title_words = [w for w in clean_title.split() if len(w) > 2][:3]
+                    # Use ALL significant words (length > 2), not just first 3!
+                    title_words = [w for w in clean_title.split() if len(w) > 2]
                     
-                    if title_words:
-                        if all(w in clean_item for w in title_words):
+                    if not title_words:
+                        # Very short title - require exact containment
+                        if clean_title.strip() in clean_item:
                             title_match = True
                             break
-                    else:
-                        if clean_title in clean_item:
+                        continue
+                    
+                    # STRICT: ALL title words must be present in item name
+                    # This prevents "Game of Thrones" matching "The Middle"
+                    if all(w in clean_item_words for w in title_words):
+                        title_match = True
+                        break
+                    
+                    # Also try: title as contiguous substring (for abbreviated names)
+                    # Example: "MASHLE" should match "MASHLE.MAGIC.AND.MUSCLES"
+                    main_word = title_words[0] if title_words else ""
+                    if len(main_word) > 4 and main_word in clean_item:
+                        # Additional check: make sure this isn't a false positive
+                        # by verifying at least one more word matches (if available)
+                        if len(title_words) == 1:
+                            title_match = True
+                            break
+                        elif any(w in clean_item_words for w in title_words[1:]):
                             title_match = True
                             break
 
@@ -308,16 +328,40 @@ class SymlinkService:
                 # Check if folder indicates a specific season (for anime patterns validation)
                 folder_season = self._extract_season_from_name(item_name_lower)
                 
+                # Helper to validate filename also contains the show title
+                def file_title_valid(filename: str) -> bool:
+                    """Check if filename contains any of the show's title words"""
+                    clean_fn = re.sub(r'[^a-zA-Z0-9\s]', ' ', filename.lower())
+                    fn_words = set(clean_fn.split())
+                    
+                    for title in titles_to_try:
+                        clean_t = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
+                        t_words = [w for w in clean_t.split() if len(w) > 3]  # Significant words
+                        
+                        if not t_words:
+                            continue
+                        
+                        # At least first significant word of title should be in filename
+                        if t_words[0] in fn_words:
+                            return True
+                        # Or title appears as substring
+                        if t_words[0] in clean_fn:
+                            return True
+                    
+                    return False
+                
                 # Now check for episode match
                 if item.is_file():
-                    if self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season):
+                    if (self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season)
+                            and file_title_valid(item.name)):
                         matches.append(item)
                             
                 elif item.is_dir():
                     try:
                         video_files = self._find_video_files(item)
                         for vf in video_files:
-                            if self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season):
+                            if (self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season)
+                                    and file_title_valid(vf.name)):
                                 matches.append(vf)
                     except Exception as e:
                         logger.error(f"Error scanning folder {item}: {e}")
