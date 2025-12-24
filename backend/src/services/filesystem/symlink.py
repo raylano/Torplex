@@ -176,6 +176,7 @@ class SymlinkService:
         patterns = [
             rf'(?<![eE]\d)(?<![eE]\d\d)s0*{season}e0*{episode}(?![\d])',  # S1E1, S01E01, but NOT S03E01E02
             rf'(?<![xX]\d)(?<![xX]\d\d){season}x0*{episode}(?![\d])',      # 1x01
+            rf's0*{season}\s*-\s*0*{episode}(?![\d])',  # S3 - 04 format (common in anime releases)
             # Anime specific patterns (when we are inside the torrent, we can be looser)
             rf'(?:e|ep|episode)\.?\s*0*{episode}\b', # Episode 001
             rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", " 01 "
@@ -189,8 +190,55 @@ class SymlinkService:
         # Search in standard mount locations
         search_locations = ["__all__", "shows", "anime"]
         
+        # Normalize torrent name for fuzzy matching
+        def normalize(name: str) -> str:
+            """Normalize name for matching - lowercase, remove special chars"""
+            import unicodedata
+            # Normalize unicode characters
+            normalized = unicodedata.normalize('NFKD', name.lower())
+            # Keep only alphanumeric and spaces
+            return re.sub(r'[^a-z0-9\s]', '', normalized)
+        
+        torrent_norm = normalize(torrent_name)
+        torrent_words = set(torrent_norm.split())
+        
         for subdir in search_locations:
-            path = self.mount_path / subdir / torrent_name
+            subdir_path = self.mount_path / subdir
+            if not subdir_path.exists():
+                continue
+            
+            # First try: exact match
+            path = subdir_path / torrent_name
+            
+            # Second try: fuzzy match if exact path doesn't exist
+            if not path.exists():
+                # Search for folders that contain most words from torrent_name
+                best_match = None
+                best_score = 0
+                
+                try:
+                    for item in subdir_path.iterdir():
+                        if not item.is_dir():
+                            continue
+                        
+                        item_norm = normalize(item.name)
+                        item_words = set(item_norm.split())
+                        
+                        # Calculate word overlap score
+                        if torrent_words and item_words:
+                            common = len(torrent_words & item_words)
+                            score = common / max(len(torrent_words), len(item_words))
+                            
+                            # Require at least 50% word match
+                            if score > 0.5 and score > best_score:
+                                best_match = item
+                                best_score = score
+                except Exception as e:
+                    logger.debug(f"Error scanning {subdir_path}: {e}")
+                
+                if best_match:
+                    logger.debug(f"Fuzzy matched '{torrent_name}' to '{best_match.name}' (score: {best_score:.2f})")
+                    path = best_match
             
             if not path.exists():
                 continue
@@ -262,6 +310,7 @@ class SymlinkService:
             rf'(?<![eE]\d)(?<![eE]\d\d)s0*{season}e0*{episode}(?![\d])',   # S03E02 but NOT part of S03E01E02
             rf'(?<![xX]\d)(?<![xX]\d\d){season}x{episode:02d}(?![\d])',     # 3x02 but not 3x01x02
             rf'season\s*{season}[^0-9]+episode\s*{episode}\b',  # Season 3 Episode 2
+            rf's0*{season}\s*-\s*0*{episode}(?![\d])',  # S3 - 04 format (common in anime releases)
         ]
         
         # Fallback patterns for anime (STRICT - only use if folder clearly matches season)
@@ -371,16 +420,19 @@ class SymlinkService:
                 
                 # Now check for episode match
                 if item.is_file():
+                    # For standalone files, require title in filename
                     if (self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season)
                             and file_title_valid(item.name)):
                         matches.append(item)
                             
                 elif item.is_dir():
+                    # For files INSIDE a matched folder, we trust the folder title match
+                    # Files often have short names like "S04E01-Title.mkv" without show name
                     try:
                         video_files = self._find_video_files(item)
                         for vf in video_files:
-                            if (self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season)
-                                    and file_title_valid(vf.name)):
+                            # Only check episode match, folder already validated title
+                            if self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season):
                                 matches.append(vf)
                     except Exception as e:
                         logger.error(f"Error scanning folder {item}: {e}")
