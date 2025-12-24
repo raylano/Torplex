@@ -14,11 +14,19 @@ from src.services.scrapers import scrape_episode as scrape_episode_all
 from src.core.quality import quality_ranker
 
 
+
 class EpisodeProcessor:
     """
     Processes TV show episodes individually.
     Each episode goes through: REQUESTED -> INDEXED -> SCRAPED -> DOWNLOADED -> SYMLINKED -> COMPLETED
     """
+    
+    # Maximum retries before marking episode as FAILED
+    MAX_SYMLINK_RETRIES = 5
+    
+    def __init__(self):
+        # Track symlink retry attempts per episode (in-memory, resets on restart)
+        self._symlink_retries: dict[str, int] = {}
     
     async def create_episodes_for_show(self, show: MediaItem, session: AsyncSession) -> int:
         """
@@ -243,7 +251,20 @@ class EpisodeProcessor:
         
         if not source_path:
             logger.warning(f"Episode file not found in mount: {show.title} S{episode.season_number}E{episode.episode_number}")
-            # Don't create bad symlinks - retry later
+            
+            # Track retry attempts - give up after MAX_SYMLINK_RETRIES attempts
+            retry_key = f"symlink_{episode.id}"
+            self._symlink_retries[retry_key] = self._symlink_retries.get(retry_key, 0) + 1
+            
+            if self._symlink_retries[retry_key] >= self.MAX_SYMLINK_RETRIES:
+                logger.error(f"❌ Max retries reached for {show.title} S{episode.season_number}E{episode.episode_number} - marking as FAILED")
+                episode.state = MediaState.FAILED
+                await session.commit()
+                del self._symlink_retries[retry_key]  # Clean up
+                return MediaState.FAILED
+            
+            logger.debug(f"Retry {self._symlink_retries[retry_key]}/{self.MAX_SYMLINK_RETRIES} for {show.title} S{episode.season_number}E{episode.episode_number}")
+            # Don't create bad symlinks - will retry later
             return episode.state
         
         # Create symlink

@@ -180,23 +180,53 @@ async def sync_plex_watchlist():
 
 
 async def retry_failed_items():
-    """Retry failed items that haven't exceeded retry limit"""
+    """
+    Daily retry of failed items.
+    Resets FAILED items back to INDEXED so they get re-scraped.
+    This gives them a fresh chance with potentially new torrents available.
+    """
     async with async_session() as session:
+        # Retry failed media items (movies)
         result = await session.execute(
             select(MediaItem)
             .where(MediaItem.state == MediaState.FAILED)
-            .where(MediaItem.retry_count < 5)
+            .where(MediaItem.retry_count < 10)  # Max 10 daily retries total
             .order_by(MediaItem.updated_at)
-            .limit(5)
+            .limit(20)
         )
         items = result.scalars().all()
         
+        items_retried = 0
         for item in items:
-            logger.info(f"Retrying failed item: {item.title} (attempt {item.retry_count + 1})")
-            item.state = MediaState.REQUESTED
+            logger.info(f"🔄 Daily retry: {item.title} (attempt {item.retry_count + 1}/10)")
+            # Reset to INDEXED so it gets re-scraped with fresh torrents
+            item.state = MediaState.INDEXED
             item.last_error = None
+            item.retry_count += 1
+            items_retried += 1
+        
+        # Retry failed episodes
+        from src.models import Episode
+        ep_result = await session.execute(
+            select(Episode)
+            .where(Episode.state == MediaState.FAILED)
+            .order_by(Episode.updated_at)
+            .limit(50)  # More episodes can be retried at once
+        )
+        episodes = ep_result.scalars().all()
+        
+        eps_retried = 0
+        for ep in episodes:
+            logger.info(f"🔄 Daily retry episode: Show ID {ep.show_id} S{ep.season_number}E{ep.episode_number}")
+            # Reset to SCRAPED for re-download/symlink attempt
+            # or INDEXED if we want full rescrape
+            ep.state = MediaState.INDEXED
+            eps_retried += 1
         
         await session.commit()
+        
+        if items_retried > 0 or eps_retried > 0:
+            logger.info(f"✅ Daily retry complete: {items_retried} items, {eps_retried} episodes queued for retry")
 
 
 async def cleanup_stale_torrents():
@@ -243,12 +273,12 @@ def setup_scheduler():
             replace_existing=True,
         )
     
-    # Retry failed items every 10 minutes
+    # Retry failed items once daily (every 24 hours)
     scheduler.add_job(
         retry_failed_items,
-        IntervalTrigger(minutes=10),
+        IntervalTrigger(hours=24),
         id="retry_failed",
-        name="Retry Failed Items",
+        name="Daily Retry Failed Items",
         replace_existing=True,
     )
     
