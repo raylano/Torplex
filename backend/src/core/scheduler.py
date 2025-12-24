@@ -159,6 +159,20 @@ async def retry_failed_items():
         await session.commit()
 
 
+async def cleanup_stale_torrents():
+    """Clean up torrents stuck at 0% for more than 24 hours"""
+    from src.services.downloaders import real_debrid_service
+    
+    if not real_debrid_service.is_configured:
+        return
+    
+    logger.info("Running stale torrent cleanup...")
+    deleted = await real_debrid_service.cleanup_stale_torrents(max_age_hours=24)
+    
+    if deleted > 0:
+        logger.info(f"Cleaned up {deleted} stale torrents (stuck at 0% for >24h)")
+
+
 def setup_scheduler():
     """Configure scheduled jobs"""
     # Process pending items every minute
@@ -195,6 +209,15 @@ def setup_scheduler():
         IntervalTrigger(minutes=10),
         id="retry_failed",
         name="Retry Failed Items",
+        replace_existing=True,
+    )
+    
+    # Cleanup stale torrents every 6 hours
+    scheduler.add_job(
+        cleanup_stale_torrents,
+        IntervalTrigger(hours=6),
+        id="cleanup_stale",
+        name="Cleanup Stale Torrents",
         replace_existing=True,
     )
     

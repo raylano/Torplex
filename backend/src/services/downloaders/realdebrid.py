@@ -131,6 +131,58 @@ class RealDebridService:
         result = await self._request("DELETE", f"/torrents/delete/{torrent_id}")
         return result is not None
     
+    async def cleanup_stale_torrents(self, max_age_hours: int = 24) -> int:
+        """
+        Delete torrents stuck at 0% progress for longer than max_age_hours.
+        Returns the number of deleted torrents.
+        """
+        from datetime import datetime, timezone
+        from dateutil.parser import parse as parse_datetime
+        
+        if not self.is_configured:
+            return 0
+        
+        torrents = await self.get_torrents()
+        if not torrents:
+            return 0
+        
+        deleted_count = 0
+        now = datetime.now(timezone.utc)
+        
+        for torrent in torrents:
+            try:
+                progress = torrent.get("progress", 100)
+                
+                # Only check torrents at 0% progress
+                if progress != 0:
+                    continue
+                
+                # Parse the added date
+                added_str = torrent.get("added")
+                if not added_str:
+                    continue
+                
+                added_time = parse_datetime(added_str)
+                if added_time.tzinfo is None:
+                    added_time = added_time.replace(tzinfo=timezone.utc)
+                
+                # Calculate age in hours
+                age_hours = (now - added_time).total_seconds() / 3600
+                
+                if age_hours > max_age_hours:
+                    torrent_id = torrent.get("id")
+                    filename = torrent.get("filename", "unknown")[:50]
+                    
+                    success = await self.delete_torrent(torrent_id)
+                    if success:
+                        deleted_count += 1
+                        logger.info(f"Cleaned up stale torrent (stuck {age_hours:.1f}h at 0%): {filename}...")
+                        
+            except Exception as e:
+                logger.debug(f"Error checking torrent for cleanup: {e}")
+        
+        return deleted_count
+    
     async def unrestrict_link(self, link: str) -> Optional[Dict]:
         """
         Unrestrict a link to get direct download URL.

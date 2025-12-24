@@ -9,20 +9,18 @@ import asyncio
 from src.services.downloaders.realdebrid import real_debrid_service, RealDebridService
 from src.services.downloaders.torbox import torbox_service, TorboxService
 from src.services.scrapers.torrentio import TorrentResult
-from src.services.scrapers.zilean import zilean_service
 
 
 class DownloaderOrchestrator:
     """
     Orchestrates multiple debrid services.
     Priority: Real-Debrid -> Torbox
-    Uses Zilean for cache checking (more reliable than RD's disabled endpoint)
+    Uses direct add-and-check for Real-Debrid (instant availability endpoint is disabled).
     """
     
     def __init__(self):
         self.real_debrid = real_debrid_service
         self.torbox = torbox_service
-        self.zilean = zilean_service
     
     @property
     def available_providers(self) -> List[str]:
@@ -36,8 +34,9 @@ class DownloaderOrchestrator:
     
     async def check_cache_all(self, info_hashes: List[str]) -> Dict[str, List[str]]:
         """
-        Check cache status using Zilean (DMM database) as primary source.
-        Falls back to debrid provider checks if Zilean not configured.
+        Check cache status on available providers.
+        For Real-Debrid: Uses add-and-check method (instant availability endpoint disabled).
+        For Torbox: Uses instant availability endpoint.
         Returns dict mapping info_hash -> list of providers where it's cached
         """
         if not info_hashes:
@@ -45,40 +44,27 @@ class DownloaderOrchestrator:
         
         results: Dict[str, List[str]] = {h.lower(): [] for h in info_hashes}
         
-        # Use Zilean as primary cache checker for Real-Debrid
-        if self.zilean.is_configured and self.real_debrid.is_configured:
-            logger.info(f"Checking {len(info_hashes)} hashes via Zilean...")
-            try:
-                zilean_results = await self.zilean.check_hashes(info_hashes)
-                for info_hash, is_cached in zilean_results.items():
-                    if is_cached:
-                        results[info_hash.lower()].append("real_debrid")
-            except Exception as e:
-                logger.error(f"Zilean cache check failed: {e}")
-        
-        # Check Torbox directly (if configured and has its own instant availability)
+        # Check Torbox instant availability (if configured)
         if self.torbox.is_configured:
             try:
                 torbox_results = await self.torbox.check_instant_availability(info_hashes)
                 for info_hash, is_cached in torbox_results.items():
-                    if is_cached and "torbox" not in results.get(info_hash.lower(), []):
+                    if is_cached:
                         results[info_hash.lower()].append("torbox")
             except Exception as e:
                 logger.error(f"Torbox cache check failed: {e}")
         
-        # If no Zilean configured, try RD directly (likely won't work due to disabled endpoint)
-        if not self.zilean.is_configured and self.real_debrid.is_configured:
-            try:
-                rd_results = await self.real_debrid.check_instant_availability(info_hashes)
-                for info_hash, is_cached in rd_results.items():
-                    if is_cached:
-                        results[info_hash.lower()].append("real_debrid")
-            except Exception as e:
-                logger.debug(f"RD cache check failed (expected): {e}")
+        # For Real-Debrid, we'll check via add-and-check when actually selecting torrents
+        # This is because RD's instant availability endpoint is disabled
+        # We mark them as potentially cached and verify during selection
+        if self.real_debrid.is_configured:
+            # Don't pre-check RD - we'll verify during torrent selection
+            logger.debug(f"Skipping RD cache pre-check for {len(info_hashes)} hashes (will verify during selection)")
         
         # Log summary
-        cached_on_any = sum(1 for v in results.values() if v)
-        logger.info(f"Cache check: {cached_on_any}/{len(info_hashes)} cached on at least one provider")
+        cached_on_torbox = sum(1 for v in results.values() if "torbox" in v)
+        if cached_on_torbox > 0:
+            logger.info(f"Cache check: {cached_on_torbox}/{len(info_hashes)} cached on Torbox")
         
         return results
     
