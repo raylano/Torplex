@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Optional, Tuple
 from loguru import logger
 
+try:
+    import PTN
+except ImportError:
+    PTN = None
+    logger.warning("PTN not installed, falling back to regex matching")
+
 from src.config import settings
 from src.models import MediaItem, MediaType
 
@@ -387,36 +393,69 @@ class SymlinkService:
                 # Helper to validate filename also contains the show title
                 def file_title_valid(filename: str) -> bool:
                     """
-                    STRICT validation: filename must contain significant title words.
-                    Requires at least 2 title words to match, or for single-word titles,
-                    the word must be at the START of the filename.
+                    STRICT validation using PTN parser.
+                    Parse the filename to extract the title, then compare with show title.
+                    This prevents 'The.Middle.S07E02' from matching 'Game of Thrones'.
                     """
+                    # Use PTN to parse the filename
+                    if PTN:
+                        try:
+                            parsed = PTN.parse(filename)
+                            extracted_title = parsed.get('title', '').lower().strip()
+                            
+                            if extracted_title:
+                                # Normalize both titles for comparison
+                                def normalize(s):
+                                    return re.sub(r'[^a-z0-9\s]', '', s.lower()).strip()
+                                
+                                extracted_norm = normalize(extracted_title)
+                                
+                                for title in titles_to_try:
+                                    title_norm = normalize(title)
+                                    
+                                    # Check for exact match or significant overlap
+                                    if extracted_norm == title_norm:
+                                        return True
+                                    
+                                    # Check if one contains the other (for abbreviated titles)
+                                    if extracted_norm in title_norm or title_norm in extracted_norm:
+                                        return True
+                                    
+                                    # Check significant word overlap (at least 50% of shorter title)
+                                    ext_words = set(extracted_norm.split())
+                                    title_words_set = set(title_norm.split())
+                                    common = ext_words & title_words_set
+                                    
+                                    # Remove short words
+                                    common = {w for w in common if len(w) > 2}
+                                    min_words = min(len(ext_words), len(title_words_set))
+                                    
+                                    if min_words > 0 and len(common) >= min_words * 0.5:
+                                        return True
+                                
+                                # No match found via PTN
+                                return False
+                        except Exception as e:
+                            logger.debug(f"PTN parsing failed for {filename}: {e}")
+                    
+                    # Fallback to word matching if PTN fails
                     clean_fn = re.sub(r'[^a-zA-Z0-9\s]', ' ', filename.lower())
                     fn_words = set(clean_fn.split())
                     
                     for title in titles_to_try:
                         clean_t = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
-                        # Only words > 3 chars to avoid matching "of", "the", etc.
                         t_words = [w for w in clean_t.split() if len(w) > 3]
                         
                         if not t_words:
                             continue
                         
-                        # Count how many title words appear in filename
                         matches_count = sum(1 for w in t_words if w in fn_words)
                         
-                        # For multi-word titles: require at least 2 words to match
-                        # This prevents "Game" alone matching "Game of Thrones"
                         if len(t_words) >= 2:
                             if matches_count >= 2:
                                 return True
-                            # For 3+ word titles, allow 60%+ match
-                            elif len(t_words) >= 3 and matches_count >= (len(t_words) * 0.6):
-                                return True
                         else:
-                            # Single significant word title: must be at START of filename
-                            # This prevents "Blendins.Game" matching "Game of Thrones"
-                            if clean_fn.startswith(t_words[0]) or fn_words and t_words[0] == list(fn_words)[0]:
+                            if clean_fn.startswith(t_words[0]):
                                 return True
                     
                     return False
