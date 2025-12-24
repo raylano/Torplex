@@ -230,24 +230,22 @@ class EpisodeProcessor:
         
         source_path = None
         
-        # First try: Use stored torrent_name for direct path construction
+        # STRICT: Only use stored torrent_name for direct path construction
+        # This prevents matching wrong files from unrelated torrents
         if episode.torrent_name:
             source_path = symlink_service.find_episode_in_torrent(
                 episode.torrent_name,
                 episode.season_number,
                 episode.episode_number
             )
-        
-        # Second try: Episode-specific search in __all__ folder (with alternative titles)
-        if not source_path:
-            import json
-            alt_titles = json.loads(show.alternative_titles or "[]") if show.alternative_titles else []
-            source_path = symlink_service.find_episode(
-                show.title,
-                episode.season_number,
-                episode.episode_number,
-                alternative_titles=alt_titles
-            )
+        else:
+            # No torrent_name means episode was added without proper download
+            # Reset to INDEXED so it can be re-scraped and downloaded properly
+            logger.warning(f"Episode has no torrent_name, resetting to INDEXED: {show.title} S{episode.season_number}E{episode.episode_number}")
+            episode.state = MediaState.INDEXED
+            episode.file_path = None
+            await session.commit()
+            return MediaState.INDEXED
         
         if not source_path:
             logger.warning(f"Episode file not found in mount: {show.title} S{episode.season_number}E{episode.episode_number}")
