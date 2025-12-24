@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models import MediaItem, Episode, MediaState, MediaType
-from src.services import tmdb_service, torrentio_scraper, downloader, symlink_service
+from src.services import tmdb_service, downloader, symlink_service
+from src.services.scrapers import scrape_episode as scrape_episode_all
 from src.core.quality import quality_ranker
 
 
@@ -137,7 +138,7 @@ class EpisodeProcessor:
             return MediaState.FAILED
     
     async def _scrape_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
-        """Scrape torrents for a single episode"""
+        """Scrape torrents for a single episode using all scrapers"""
         logger.info(f"Scraping: {show.title} S{episode.season_number:02d}E{episode.episode_number:02d}")
         
         if not show.imdb_id:
@@ -145,11 +146,12 @@ class EpisodeProcessor:
             await session.commit()
             return MediaState.FAILED
         
-        # Scrape for this specific episode
-        torrents = await torrentio_scraper.scrape_episode(
+        # Scrape using ALL scrapers (Torrentio + MediaFusion + Prowlarr)
+        torrents = await scrape_episode_all(
             show.imdb_id,
             episode.season_number,
-            episode.episode_number
+            episode.episode_number,
+            title=show.title
         )
         
         if not torrents:

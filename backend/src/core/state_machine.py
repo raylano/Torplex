@@ -10,12 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models import MediaItem, MediaState, MediaType
 from src.services import (
     tmdb_service,
-    torrentio_scraper,
-    prowlarr_scraper,
     downloader,
     symlink_service,
     plex_service,
 )
+from src.services.scrapers import scrape_movie as scrape_movie_all
 from src.core.quality import quality_ranker
 
 
@@ -172,7 +171,7 @@ class StateMachine:
             logger.info(f"Stored {len(all_titles)} alternative titles for {item.title}")
     
     async def _scrape_item(self, item: MediaItem, session: AsyncSession) -> MediaState:
-        """Scrape for torrents"""
+        """Scrape for torrents using all scrapers (Torrentio + MediaFusion + Prowlarr)"""
         logger.info(f"Scraping: {item.title}")
         
         if not item.imdb_id:
@@ -181,15 +180,8 @@ class StateMachine:
             await session.commit()
             return MediaState.FAILED
         
-        # Get torrents from Torrentio
-        torrents = await torrentio_scraper.scrape_movie(item.imdb_id)
-        
-        # Also try Prowlarr if configured
-        if prowlarr_scraper.is_configured:
-            prowlarr_results = await prowlarr_scraper.search_movie(
-                item.title, item.year, item.imdb_id
-            )
-            torrents.extend(prowlarr_results)
+        # Get torrents from ALL scrapers (Torrentio + MediaFusion + Prowlarr)
+        torrents = await scrape_movie_all(item.imdb_id, title=item.title, year=item.year)
         
         if not torrents:
             logger.warning(f"No torrents found for: {item.title}")

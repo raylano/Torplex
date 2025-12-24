@@ -46,6 +46,7 @@ class ProwlarrScraper:
     ) -> List[TorrentResult]:
         """
         Search Prowlarr for torrents.
+        Uses title search primarily (many indexers don't support IMDB search).
         
         Categories:
         - 2000: Movies
@@ -57,14 +58,12 @@ class ProwlarrScraper:
             return []
         
         try:
-            # Build search params
+            # Build search params - use title/query, not IMDB ID
+            # Many indexers don't support IMDB search syntax
             params = {
                 "query": query,
                 "type": "search",
             }
-            
-            if imdb_id:
-                params["query"] = f"{{ImdbId:{imdb_id}}}"
             
             if categories:
                 params["categories"] = categories
