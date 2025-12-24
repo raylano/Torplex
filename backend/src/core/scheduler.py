@@ -99,27 +99,44 @@ async def sync_plex_watchlist():
     if not watchlist_items:
         return
     
+    added_count = 0
+    
     async with async_session() as session:
         for plex_item in watchlist_items:
             try:
                 # Extract IDs
                 ids = plex_service.extract_ids(plex_item)
+                title = plex_item.get("title", "Unknown")
+                year = plex_item.get("year")
                 
-                # Check if already in database
+                # Check if already in database by IMDB ID
                 imdb_id = ids.get("imdb_id")
+                existing = None
+                
                 if imdb_id:
                     result = await session.execute(
                         select(MediaItem).where(MediaItem.imdb_id == imdb_id)
                     )
                     existing = result.scalar_one_or_none()
-                    
-                    if existing:
-                        continue  # Already tracking this
+                
+                # If no IMDB ID or not found, check by title + year
+                if not existing:
+                    from sqlalchemy import and_
+                    result = await session.execute(
+                        select(MediaItem).where(
+                            and_(
+                                MediaItem.title == title,
+                                MediaItem.year == year
+                            )
+                        )
+                    )
+                    existing = result.scalar_one_or_none()
+                
+                if existing:
+                    continue  # Already tracking this
                 
                 # Create new media item
-                title = plex_item.get("title", "Unknown")
                 media_type = plex_item.get("type", "movie")
-                year = plex_item.get("year")
                 
                 from src.models import MediaType
                 if media_type == "show":
@@ -137,12 +154,19 @@ async def sync_plex_watchlist():
                 )
                 
                 session.add(new_item)
+                added_count += 1
                 logger.info(f"Added from Plex Watchlist: {title}")
                 
             except Exception as e:
                 logger.error(f"Error adding watchlist item: {e}")
         
         await session.commit()
+    
+    if added_count > 0:
+        logger.info(f"Watchlist sync complete: added {added_count} new items")
+    else:
+        logger.debug("Watchlist sync complete: no new items")
+
 
 
 async def retry_failed_items():
