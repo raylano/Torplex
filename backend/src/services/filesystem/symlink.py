@@ -307,6 +307,7 @@ class SymlinkService:
                     # This prevents "Game of Thrones" matching "The Middle"
                     if all(w in clean_item_words for w in title_words):
                         title_match = True
+                        logger.debug(f"Title match (all words): '{title}' matched '{item.name}'")
                         break
                     
                     # Also try: title as contiguous substring (for abbreviated names)
@@ -317,9 +318,11 @@ class SymlinkService:
                         # by verifying at least one more word matches (if available)
                         if len(title_words) == 1:
                             title_match = True
+                            logger.debug(f"Title match (single word): '{title}' matched '{item.name}'")
                             break
                         elif any(w in clean_item_words for w in title_words[1:]):
                             title_match = True
+                            logger.debug(f"Title match (main + partial): '{title}' matched '{item.name}'")
                             break
 
                 if not title_match:
@@ -330,23 +333,34 @@ class SymlinkService:
                 
                 # Helper to validate filename also contains the show title
                 def file_title_valid(filename: str) -> bool:
-                    """Check if filename contains any of the show's title words"""
+                    """
+                    STRICT validation: filename must contain significant title words.
+                    Requires at least 2 title words to match, or for single-word titles,
+                    the word must be at the START of the filename.
+                    """
                     clean_fn = re.sub(r'[^a-zA-Z0-9\s]', ' ', filename.lower())
                     fn_words = set(clean_fn.split())
                     
                     for title in titles_to_try:
                         clean_t = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
-                        t_words = [w for w in clean_t.split() if len(w) > 3]  # Significant words
+                        # Only words > 3 chars to avoid matching "of", "the", etc.
+                        t_words = [w for w in clean_t.split() if len(w) > 3]
                         
                         if not t_words:
                             continue
                         
-                        # At least first significant word of title should be in filename
-                        if t_words[0] in fn_words:
-                            return True
-                        # Or title appears as substring
-                        if t_words[0] in clean_fn:
-                            return True
+                        # Count how many title words appear in filename
+                        matches_count = sum(1 for w in t_words if w in fn_words)
+                        
+                        # For multi-word titles: require at least 2 words OR >50% of words
+                        if len(t_words) >= 2:
+                            if matches_count >= 2 or matches_count >= len(t_words) / 2:
+                                return True
+                        else:
+                            # Single significant word title: must be at START of filename
+                            # This prevents "Blendins.Game" matching "Game of Thrones"
+                            if clean_fn.startswith(t_words[0]) or fn_words and t_words[0] == list(fn_words)[0]:
+                                return True
                     
                     return False
                 
