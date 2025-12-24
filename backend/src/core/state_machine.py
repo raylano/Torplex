@@ -58,11 +58,23 @@ class StateMachine:
                 return item.state
                 
         except Exception as e:
+            # Rollback any pending changes first (required after IntegrityError)
+            await session.rollback()
+            
             logger.error(f"Error processing {item.title}: {e}")
-            item.state = MediaState.FAILED
-            item.last_error = str(e)
-            item.retry_count += 1
-            await session.commit()
+            
+            # Re-fetch the item after rollback
+            from sqlalchemy import select
+            stmt = select(MediaItem).where(MediaItem.id == item.id)
+            result = await session.execute(stmt)
+            item = result.scalar_one_or_none()
+            
+            if item:
+                item.state = MediaState.FAILED
+                item.last_error = str(e)[:500]  # Truncate long errors
+                item.retry_count += 1
+                await session.commit()
+            
             return MediaState.FAILED
     
     async def _index_item(self, item: MediaItem, session: AsyncSession) -> MediaState:

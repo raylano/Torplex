@@ -172,9 +172,10 @@ class SymlinkService:
             return None
         
         # Patterns to match episode numbers
+        # IMPORTANT: Prevent matching S03E01E02 as S03E02 using negative lookbehind
         patterns = [
-            rf's0?{season}e0?{episode}\b',       # S1E1, S01E01, S1E01, etc
-            rf'{season}x0?{episode}\b',          # 1x01
+            rf'(?<![eE]\d)(?<![eE]\d\d)s0*{season}e0*{episode}(?![\d])',  # S1E1, S01E01, but NOT S03E01E02
+            rf'(?<![xX]\d)(?<![xX]\d\d){season}x0*{episode}(?![\d])',      # 1x01
             # Anime specific patterns (when we are inside the torrent, we can be looser)
             rf'(?:e|ep|episode)\.?\s*0*{episode}\b', # Episode 001
             rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", " 01 "
@@ -255,10 +256,12 @@ class SymlinkService:
         
         # STRICT patterns - must match EXACT season AND episode
         # This prevents S04E18 from matching S02E18 files!
+        # IMPORTANT: Use negative lookbehind (?<!E\d) to prevent matching 
+        # the second episode in double-episode files like S03E01E02
         strict_patterns = [
-            rf's0*{season}e0*{episode}\b',        # S04E18, S4E18, S04E018 etc
-            rf'{season}x{episode:02d}\b',         # 4x18
-            rf'season\s*{season}[^0-9]+episode\s*{episode}\b',  # Season 4 Episode 18
+            rf'(?<![eE]\d)(?<![eE]\d\d)s0*{season}e0*{episode}(?![\d])',   # S03E02 but NOT part of S03E01E02
+            rf'(?<![xX]\d)(?<![xX]\d\d){season}x{episode:02d}(?![\d])',     # 3x02 but not 3x01x02
+            rf'season\s*{season}[^0-9]+episode\s*{episode}\b',  # Season 3 Episode 2
         ]
         
         # Fallback patterns for anime (only use if folder clearly matches season)
