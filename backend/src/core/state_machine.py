@@ -34,6 +34,10 @@ class StateMachine:
         Process a media item through the pipeline.
         Returns the new state.
         """
+        # Store item info BEFORE processing - needed for error handling after rollback
+        item_id = item.id
+        item_title = item.title
+        
         try:
             if item.state == MediaState.REQUESTED:
                 return await self._index_item(item, session)
@@ -54,26 +58,30 @@ class StateMachine:
                 return await self._complete_item(item, session)
             
             else:
-                logger.debug(f"Item {item.title} in terminal state: {item.state}")
+                logger.debug(f"Item {item_title} in terminal state: {item.state}")
                 return item.state
                 
         except Exception as e:
-            # Rollback any pending changes first (required after IntegrityError)
-            await session.rollback()
+            error_msg = str(e)[:500]
+            logger.error(f"Error processing {item_title} (id={item_id}): {error_msg}")
             
-            logger.error(f"Error processing {item.title}: {e}")
-            
-            # Re-fetch the item after rollback
-            from sqlalchemy import select
-            stmt = select(MediaItem).where(MediaItem.id == item.id)
-            result = await session.execute(stmt)
-            item = result.scalar_one_or_none()
-            
-            if item:
-                item.state = MediaState.FAILED
-                item.last_error = str(e)[:500]  # Truncate long errors
-                item.retry_count += 1
-                await session.commit()
+            # Rollback and use fresh session to update item
+            try:
+                await session.rollback()
+                
+                # Re-fetch and update item state
+                from sqlalchemy import select
+                stmt = select(MediaItem).where(MediaItem.id == item_id)
+                result = await session.execute(stmt)
+                fresh_item = result.scalar_one_or_none()
+                
+                if fresh_item:
+                    fresh_item.state = MediaState.FAILED
+                    fresh_item.last_error = error_msg
+                    fresh_item.retry_count += 1
+                    await session.commit()
+            except Exception as inner_e:
+                logger.warning(f"Could not update failed state for {item_title}: {inner_e}")
             
             return MediaState.FAILED
     

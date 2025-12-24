@@ -44,6 +44,8 @@ async def process_pending_items():
             logger.info(f"Processing {len(items)} pending items...")
         
         for item in items:
+            # Store title before try block - session may be invalid after error
+            item_title = item.title
             try:
                 # For TV shows, create episodes after indexing
                 is_tv_show = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
@@ -53,21 +55,21 @@ async def process_pending_items():
                     created = await episode_processor.create_episodes_for_show(item, session)
                     
                     if created > 0:
-                        logger.info(f"TV Show {item.title}: created {created} episodes")
+                        logger.info(f"TV Show {item_title}: created {created} episodes")
                     
                     # Move show to COMPLETED - episodes are processed separately
                     # The show itself is "done" - individual episodes track their own status
                     item.state = MediaState.COMPLETED
                     await session.commit()
-                    logger.info(f"TV Show {item.title} ready - {created} episodes queued for processing")
+                    logger.info(f"TV Show {item_title} ready - {created} episodes queued for processing")
                     continue
                 
                 # For movies, process normally
                 new_state = await state_machine.process_item(item, session)
-                logger.debug(f"{item.title}: {item.state} -> {new_state}")
+                logger.debug(f"{item_title}: {item.state} -> {new_state}")
                 
             except Exception as e:
-                logger.error(f"Error processing {item.title}: {e}")
+                logger.error(f"Error processing {item_title}: {e}")
 
 
 async def process_pending_episodes():
