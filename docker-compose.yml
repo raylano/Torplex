@@ -61,18 +61,23 @@ services:
       - /mnt/torplex:/data:rshared
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro
-    command: >
-      mount zurg: /data
-      --allow-other
-      --allow-non-empty
-      --vfs-cache-mode full
-      --vfs-cache-max-size 50G
-      --vfs-read-ahead 128M
-      --dir-cache-time 1000h
-      --buffer-size 32M
-      --log-level INFO
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting 60 seconds for Zurg to initialize..."
+        sleep 60
+        echo "Starting rclone mount..."
+        rclone mount zurg: /data \
+          --allow-other \
+          --allow-non-empty \
+          --vfs-cache-mode full \
+          --vfs-cache-max-size 50G \
+          --vfs-read-ahead 128M \
+          --dir-cache-time 1000h \
+          --buffer-size 32M \
+          --log-level INFO
     depends_on:
-      - zurg  # Just wait for start, health check not needed
+      - zurg
     networks:
       - torplex_net
 
