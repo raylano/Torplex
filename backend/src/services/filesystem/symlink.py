@@ -264,12 +264,13 @@ class SymlinkService:
             rf'season\s*{season}[^0-9]+episode\s*{episode}\b',  # Season 3 Episode 2
         ]
         
-        # Fallback patterns for anime (only use if folder clearly matches season)
+        # Fallback patterns for anime (STRICT - only use if folder clearly matches season)
         # These patterns only match episode number, so require extra validation
+        # IMPORTANT: Patterns must NOT match numbers in quality strings like "DDP5 1 Atmos"
         anime_patterns = [
-            rf'(?:e|ep|episode)\.?\s*0*{episode}\b', # Episode 018, Episode 18
-            rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone: " 018 ", "[18]"
-            rf' - 0*{episode}(?:\s|\.|$)',        # " - 18 " common in anime
+            rf'(?:e|ep|episode)\.?\s*0*{episode}(?!\d)',  # Episode 018 (requires 'e' prefix)
+            rf'(?:^|\[)\s*0*{episode}(?:\s*\]|\s*-)',     # [018] or [18 - at START only
+            rf'^\s*-?\s*0*{episode}\s*(?:\[|\-|$)',       # " - 18 " at start only
         ]
         
         logger.info(f"Searching for episode: {show_title} S{season:02d}E{episode:02d}")
@@ -352,9 +353,13 @@ class SymlinkService:
                         # Count how many title words appear in filename
                         matches_count = sum(1 for w in t_words if w in fn_words)
                         
-                        # For multi-word titles: require at least 2 words OR >50% of words
+                        # For multi-word titles: require at least 2 words to match
+                        # This prevents "Game" alone matching "Game of Thrones"
                         if len(t_words) >= 2:
-                            if matches_count >= 2 or matches_count >= len(t_words) / 2:
+                            if matches_count >= 2:
+                                return True
+                            # For 3+ word titles, allow 60%+ match
+                            elif len(t_words) >= 3 and matches_count >= (len(t_words) * 0.6):
                                 return True
                         else:
                             # Single significant word title: must be at START of filename
