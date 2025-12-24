@@ -377,6 +377,9 @@ class SymlinkService:
 
                 if not title_match:
                     continue
+                
+                # Log which folder matched
+                logger.debug(f"Folder matched: {item.name} for show: {show_title}")
 
                 # Check if folder indicates a specific season (for anime patterns validation)
                 folder_season = self._extract_season_from_name(item_name_lower)
@@ -426,14 +429,21 @@ class SymlinkService:
                         matches.append(item)
                             
                 elif item.is_dir():
-                    # For files INSIDE a matched folder, we trust the folder title match
-                    # Files often have short names like "S04E01-Title.mkv" without show name
+                    # CRITICAL: Even for files inside folders, we MUST validate title
+                    # to prevent Game of Thrones matching The Middle files
                     try:
                         video_files = self._find_video_files(item)
                         for vf in video_files:
-                            # Only check episode match, folder already validated title
                             if self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season):
-                                matches.append(vf)
+                                # Check if filename contains title OR if folder is an EXACT season match
+                                # (e.g., "My Hero Academia S04/" folder with "S04E01-Title.mkv" files)
+                                folder_has_show_in_name = file_title_valid(item.name)
+                                file_has_show_in_name = file_title_valid(vf.name)
+                                
+                                if folder_has_show_in_name or file_has_show_in_name:
+                                    matches.append(vf)
+                                else:
+                                    logger.debug(f"Rejected {vf.name} - no title match in folder or file")
                     except Exception as e:
                         logger.error(f"Error scanning folder {item}: {e}")
         
