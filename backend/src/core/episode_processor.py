@@ -81,7 +81,9 @@ class EpisodeProcessor:
                 pass  # TODO: Implement proper absolute conversion if needed
             
             if existing_file:
-                # File exists! Create as DOWNLOADED (ready for symlink)
+                # File exists! Create as DOWNLOADED (ready for symlink!)
+                # Extract the parent folder name as "torrent_name" so symlink step can find it
+                parent_folder = existing_file.parent.name if existing_file.parent else existing_file.name
                 episode = Episode(
                     show_id=show.id,
                     season_number=season,
@@ -91,6 +93,7 @@ class EpisodeProcessor:
                     air_date=ep_data.get("air_date"),
                     state=MediaState.DOWNLOADED,  # Ready for symlink!
                     file_path=str(existing_file),
+                    torrent_name=parent_folder,  # Store folder name for symlink lookup
                 )
                 pre_filled += 1
             else:
@@ -262,15 +265,24 @@ class EpisodeProcessor:
         
         source_path = None
         
-        # STRICT: Only use stored torrent_name for direct path construction
-        # This prevents matching wrong files from unrelated torrents
-        if episode.torrent_name:
+        # OPTION 1: Direct file path from mount scan (fastest, most reliable)
+        if episode.file_path:
+            from pathlib import Path
+            direct_path = Path(episode.file_path)
+            if direct_path.exists() and direct_path.is_file():
+                source_path = direct_path
+                logger.debug(f"Using direct file path from mount scan: {direct_path.name}")
+        
+        # OPTION 2: Use stored torrent_name for path construction
+        if not source_path and episode.torrent_name:
             source_path = symlink_service.find_episode_in_torrent(
                 episode.torrent_name,
                 episode.season_number,
                 episode.episode_number
             )
-        else:
+        
+        # FALLBACK: No file_path and no torrent_name - reset to INDEXED
+        if not source_path and not episode.torrent_name and not episode.file_path:
             # No torrent_name means episode was added without proper download
             # Reset to INDEXED so it can be re-scraped and downloaded properly
             logger.warning(f"Episode has no torrent_name, resetting to INDEXED: {show.title} S{episode.season_number}E{episode.episode_number}")
