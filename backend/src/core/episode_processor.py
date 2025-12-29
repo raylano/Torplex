@@ -170,20 +170,52 @@ class EpisodeProcessor:
         
         logger.info(f"Found {len(torrents)} torrents for S{episode.season_number}E{episode.episode_number}")
         
-        # Check cache and select best
+        # Check cache status (Torbox only - RD requires per-torrent check)
         info_hashes = [t.info_hash for t in torrents]
         cache_status = await downloader.check_cache_all(info_hashes)
         
+        # Rank torrents by quality (with anime preferences for dual-audio)
         if show.is_anime:
-            best = quality_ranker.get_best_for_anime(torrents, cache_status)
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=True, cached_providers=cache_status)
         else:
-            best = quality_ranker.get_best_for_movie_or_show(torrents, cache_status)
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=False, cached_providers=cache_status)
+        
+        if not ranked:
+            episode.state = MediaState.FAILED
+            await session.commit()
+            return MediaState.FAILED
+        
+        # Smart selection: check top candidates for cache
+        best = None
+        is_cached = False
+        
+        # First, check if any are already known to be cached (from Torbox)
+        for t in ranked[:5]:
+            if cache_status.get(t.info_hash.lower()):
+                best = t
+                is_cached = True
+                break
+        
+        # If not cached on Torbox, check top candidates on Real-Debrid
+        if not best:
+            for t in ranked[:5]:
+                rd_result = await downloader.check_instant_via_add(t.info_hash)
+                if rd_result and rd_result.get("cached"):
+                    best = t
+                    is_cached = True
+                    logger.info(f"✅ Found cached on RD: {t.title[:40]}...")
+                    break
+        
+        # If still no cached found, take the best quality
+        if not best:
+            best = ranked[0]
+            logger.debug(f"No cached, taking best quality: {best.title[:40]}...")
         
         if best:
             episode.file_path = best.info_hash
             episode.state = MediaState.SCRAPED
             await session.commit()
-            logger.info(f"Selected: {best.title[:40]}...")
+            logger.info(f"Selected{'✓ CACHED' if is_cached else ''}: {best.title[:40]}...")
             return MediaState.SCRAPED
         
         episode.state = MediaState.FAILED

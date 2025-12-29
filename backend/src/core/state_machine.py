@@ -212,21 +212,54 @@ class StateMachine:
         
         logger.info(f"Found {len(torrents)} torrents for {item.title}")
         
-        # Check cache status
+        # Check cache status (Torbox only - RD requires per-torrent check)
         info_hashes = [t.info_hash for t in torrents]
         cache_status = await downloader.check_cache_all(info_hashes)
         
-        # Rank and select best torrent
+        # Rank torrents by quality (with anime preferences)
         if item.is_anime:
-            best = quality_ranker.get_best_for_anime(torrents, cache_status)
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=True, cached_providers=cache_status)
         else:
-            best = quality_ranker.get_best_for_movie_or_show(torrents, cache_status)
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=False, cached_providers=cache_status)
+        
+        if not ranked:
+            item.state = MediaState.FAILED
+            item.last_error = "No suitable torrent found"
+            await session.commit()
+            return MediaState.FAILED
+        
+        # Smart selection: check top candidates for Real-Debrid cache
+        # This does per-torrent checks but limits to top 5 to reduce API calls
+        best = None
+        is_cached = False
+        
+        # First, check if any are already known to be cached (from Torbox)
+        for t in ranked[:5]:
+            if cache_status.get(t.info_hash.lower()):
+                best = t
+                is_cached = True
+                logger.info(f"Found cached on Torbox: {t.title[:50]}...")
+                break
+        
+        # If not cached on Torbox, check top candidates on Real-Debrid
+        if not best:
+            for t in ranked[:5]:
+                rd_result = await downloader.check_instant_via_add(t.info_hash)
+                if rd_result and rd_result.get("cached"):
+                    best = t
+                    is_cached = True
+                    logger.info(f"✅ Found cached on Real-Debrid: {t.title[:50]}...")
+                    break
+        
+        # If still no cached found, take the best quality (first ranked)
+        if not best:
+            best = ranked[0]
+            is_cached = False
+            logger.info(f"⚠️ No cached found, taking best quality: {best.title[:50]}...")
         
         if best:
-            # Store selected torrent info on item (simplified - in real impl would use TorrentInfo model)
+            # Store selected torrent info on item  
             item.file_path = best.info_hash  # Temporarily store hash here
-            providers = cache_status.get(best.info_hash.lower(), [])
-            is_cached = len(providers) > 0
             
             logger.info(f"Selected: {best.title[:50]}... (cached: {is_cached})")
             
