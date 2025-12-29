@@ -1,0 +1,86 @@
+version: "3.9"
+
+services:
+  # Riven Backend - Media Management System
+  riven:
+    image: spoked/riven:latest
+    container_name: riven
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    tty: true
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    shm_size: 1024m
+    devices:
+      - /dev/fuse
+    environment:
+      - PUID=0
+      - PGID=0
+      - TZ=Europe/Amsterdam
+      - RIVEN_FORCE_ENV=true
+      - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven-db/riven
+    healthcheck:
+      test: curl -s http://localhost:8080 >/dev/null || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - ./riven-data:/riven/data
+      # Mount the existing Zurg mount
+      - /mnt/torplex:/mnt/zurg:rshared
+      # Symlinks output to Plex library
+      - /root/Torplex/data/media:/mnt/media
+    depends_on:
+      riven_postgres:
+        condition: service_healthy
+    networks:
+      - riven_network
+      - torplex_default  # Connect to existing Torplex network for Prowlarr access
+
+  # Riven Frontend (Web UI)
+  riven-frontend:
+    image: spoked/riven-frontend:latest
+    container_name: riven-frontend
+    restart: unless-stopped
+    tty: true
+    environment:
+      - TZ=Europe/Amsterdam
+      - ORIGIN=http://localhost:3100
+      - BACKEND_URL=http://riven:8080
+      - DIALECT=postgres
+      - DATABASE_URL=postgres://postgres:postgres@riven-db/riven
+    ports:
+      - "3100:3000"
+    depends_on:
+      riven:
+        condition: service_healthy
+    networks:
+      - riven_network
+
+  # Riven Database (separate from Torplex)
+  riven_postgres:
+    image: postgres:17-alpine
+    container_name: riven-db
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=riven
+    volumes:
+      - ./riven-db:/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - riven_network
+
+networks:
+  riven_network:
+    driver: bridge
+  torplex_default:
+    external: true
