@@ -24,6 +24,10 @@ class TorrentResult:
     is_dual_audio: bool = False
     is_dubbed: bool = False
     release_group: Optional[str] = None
+    # Usenet fields
+    download_url: Optional[str] = None  # NZB URL
+    guid: Optional[str] = None          # Unique ID for Usenet items
+    is_usenet: bool = False
 
 
 class TorrentioScraper:

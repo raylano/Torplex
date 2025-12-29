@@ -215,10 +215,15 @@ class EpisodeProcessor:
             logger.debug(f"No cached, taking best quality: {best.title[:40]}...")
         
         if best:
-            episode.file_path = best.info_hash
+            if best.is_usenet:
+                episode.file_path = f"usenet:{best.download_url}"
+                logger.info(f"Selected Usenet: {best.title[:40]}...")
+            else:
+                episode.file_path = best.info_hash
+                logger.info(f"Selected{'✓ CACHED' if is_cached else ''}: {best.title[:40]}...")
+            
             episode.state = MediaState.SCRAPED
             await session.commit()
-            logger.info(f"Selected{'✓ CACHED' if is_cached else ''}: {best.title[:40]}...")
             return MediaState.SCRAPED
         
         episode.state = MediaState.FAILED
@@ -226,28 +231,44 @@ class EpisodeProcessor:
         return MediaState.FAILED
     
     async def _download_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
-        """Add episode torrent to debrid and store torrent info for symlink"""
+        """Add episode torrent or usenet item to debrid"""
         logger.info(f"Downloading: {show.title} S{episode.season_number:02d}E{episode.episode_number:02d}")
         
-        info_hash = episode.file_path
-        if not info_hash:
+        file_path_or_hash = episode.file_path
+        if not file_path_or_hash:
             episode.state = MediaState.FAILED
             await session.commit()
             return MediaState.FAILED
         
-        # Try instant check first (Riven-style) - this also adds the torrent
-        instant = await downloader.check_instant_via_add(info_hash)
+        # Check if Usenet
+        is_usenet = False
+        info_hash = file_path_or_hash
+        download_url = None
         
-        if instant and instant.get("cached"):
-            # Store torrent name for symlink matching
-            episode.torrent_name = instant.get("filename")
-            episode.state = MediaState.DOWNLOADED
-            await session.commit()
-            logger.info(f"✅ Cached! Torrent: {episode.torrent_name[:40] if episode.torrent_name else 'N/A'}...")
-            return MediaState.DOWNLOADED
+        if file_path_or_hash.startswith("usenet:"):
+            is_usenet = True
+            download_url = file_path_or_hash.split("usenet:", 1)[1]
+            info_hash = None
+            logger.info(f"Adding Usenet item: {download_url[:30]}...")
+
+        # If standard torrent, try Riven-style instant check first
+        if not is_usenet:
+            instant = await downloader.check_instant_via_add(info_hash)
+            
+            if instant and instant.get("cached"):
+                # Store torrent name for symlink matching
+                episode.torrent_name = instant.get("filename")
+                episode.state = MediaState.DOWNLOADED
+                await session.commit()
+                logger.info(f"✅ Cached! Torrent: {episode.torrent_name[:40] if episode.torrent_name else 'N/A'}...")
+                return MediaState.DOWNLOADED
         
-        # Not cached - add normally and wait
-        provider, debrid_id = await downloader.add_torrent(info_hash)
+        # Add to debrid (Torbox or standard RD add)
+        provider, debrid_id = await downloader.add_torrent(
+            info_hash, 
+            download_url=download_url,
+            is_usenet=is_usenet
+        )
         
         if provider and debrid_id:
             episode.state = MediaState.DOWNLOADED
@@ -266,7 +287,7 @@ class EpisodeProcessor:
         source_path = None
         
         # OPTION 1: Direct file path from mount scan (fastest, most reliable)
-        if episode.file_path:
+        if episode.file_path and not episode.file_path.startswith("usenet:"):
             from pathlib import Path
             direct_path = Path(episode.file_path)
             if direct_path.exists() and direct_path.is_file():
@@ -280,9 +301,25 @@ class EpisodeProcessor:
                 episode.season_number,
                 episode.episode_number
             )
+            
+        # OPTION 3: General search in mount (fallback for Usenet or unknown torrent names)
+        # This is critical for Usenet where we don't know the folder name in advance
+        if not source_path and (episode.file_path and episode.file_path.startswith("usenet:")):
+             source_path = symlink_service.find_episode(
+                show.title,
+                episode.season_number,
+                episode.episode_number,
+                alternative_titles=None # Could fetch these if needed
+            )
+            
+             if source_path:
+                 logger.info(f"Found Usenet file via general search: {source_path.name}")
         
         # FALLBACK: No file_path and no torrent_name - reset to INDEXED
-        if not source_path and not episode.torrent_name and not episode.file_path:
+        # (Only if it's NOT a Usenet item - Usenet items have a file_path starting with usenet:)
+        is_usenet = episode.file_path and episode.file_path.startswith("usenet:")
+        
+        if not source_path and not episode.torrent_name and not is_usenet and not episode.file_path:
             # No torrent_name means episode was added without proper download
             # Reset to INDEXED so it can be re-scraped and downloaded properly
             logger.warning(f"Episode has no torrent_name, resetting to INDEXED: {show.title} S{episode.season_number}E{episode.episode_number}")

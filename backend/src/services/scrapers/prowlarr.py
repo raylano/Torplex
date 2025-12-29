@@ -45,27 +45,30 @@ class ProwlarrScraper:
         categories: Optional[List[int]] = None
     ) -> List[TorrentResult]:
         """
-        Search Prowlarr for torrents.
-        Uses title search primarily (many indexers don't support IMDB search).
+        Search Prowlarr for torrents and NZBs.
         
         Categories:
         - 2000: Movies
         - 5000: TV
         - 5070: Anime
+        - 8000: Other (often used for Usenet)
         """
         if not self.is_configured:
             logger.warning("Prowlarr API key not configured")
             return []
         
         try:
-            # Build search params - use title/query, not IMDB ID
-            # Many indexers don't support IMDB search syntax
+            # Build search params
             params = {
                 "query": query,
                 "type": "search",
             }
             
             if categories:
+                # Add typical Usenet categories if generic movie/tv search
+                if 2000 in categories and 5000 in categories:
+                    # General search, include everything
+                    pass 
                 params["categories"] = categories
             
             url = f"{self.url}/api/v1/search"
@@ -73,15 +76,15 @@ class ProwlarrScraper:
             response.raise_for_status()
             
             results = response.json()
-            torrents = []
+            items = []
             
             for item in results:
-                torrent = self._parse_result(item)
-                if torrent:
-                    torrents.append(torrent)
+                parsed_item = self._parse_result(item)
+                if parsed_item:
+                    items.append(parsed_item)
             
-            logger.info(f"Prowlarr found {len(torrents)} results for '{query}'")
-            return torrents
+            logger.info(f"Prowlarr found {len(items)} results for '{query}'")
+            return items
             
         except httpx.HTTPStatusError as e:
             logger.error(f"Prowlarr HTTP error: {e.response.status_code}")
@@ -89,33 +92,17 @@ class ProwlarrScraper:
         except Exception as e:
             logger.error(f"Prowlarr search failed: {e}")
             return []
-    
-    async def search_movie(self, title: str, year: Optional[int] = None, imdb_id: Optional[str] = None) -> List[TorrentResult]:
-        """Search for movie torrents"""
-        query = f"{title} {year}" if year else title
-        return await self.search(query, imdb_id=imdb_id, categories=[2000])
-    
-    async def search_tv(
-        self,
-        title: str,
-        season: Optional[int] = None,
-        episode: Optional[int] = None,
-        imdb_id: Optional[str] = None
-    ) -> List[TorrentResult]:
-        """Search for TV show torrents"""
-        query = title
-        if season is not None and episode is not None:
-            query = f"{title} S{season:02d}E{episode:02d}"
-        elif season is not None:
-            query = f"{title} S{season:02d}"
-        
-        return await self.search(query, imdb_id=imdb_id, categories=[5000, 5070])
-    
+
     def _parse_result(self, item: dict) -> Optional[TorrentResult]:
         """Parse Prowlarr search result to TorrentResult"""
-        # Get magnet/info hash
+        # Get identifier (Hash for torrent, GUID/URL for Usenet)
         info_hash = item.get("infoHash")
         magnet_url = item.get("magnetUrl", "")
+        download_url = item.get("downloadUrl", "")
+        guid = item.get("guid", "")
+        
+        # Determine if Usenet (no hash, but has download/guid)
+        is_usenet = False
         
         # Extract hash from magnet if not provided
         if not info_hash and magnet_url:
@@ -123,9 +110,18 @@ class ProwlarrScraper:
             if match:
                 info_hash = match.group(1)
         
-        if not info_hash:
-            return None
+        # If no hash but has download URL (and protocol is Usenet or just no hash)
+        if not info_hash and download_url:
+            indexer_flags = item.get("indexerFlags", [])
+            # Heuristic: If it has Usenet flag, or protocol is usenet, or just has downloadUrl and no hash
+            # Prowlarr results usually have protocol field
+            protocol = item.get("protocol")
+            if protocol == "usenet" or not info_hash:
+                is_usenet = True
         
+        if not info_hash and not is_usenet:
+            return None
+            
         title = item.get("title", "")
         
         # Parse quality
@@ -144,7 +140,7 @@ class ProwlarrScraper:
             release_group = group_match.group(1)
         
         return TorrentResult(
-            info_hash=info_hash.lower(),
+            info_hash=info_hash.lower() if info_hash else None,
             title=title,
             source="prowlarr",
             indexer=item.get("indexer"),
@@ -152,10 +148,13 @@ class ProwlarrScraper:
             quality=quality,
             codec=codec,
             size_bytes=item.get("size"),
-            seeders=item.get("seeders"),
+            seeders=item.get("seeders") if not is_usenet else 100,  # Fake seeders for Usenet
             is_dual_audio=is_dual_audio,
             is_dubbed=is_dubbed,
             release_group=release_group,
+            download_url=download_url,
+            guid=guid,
+            is_usenet=is_usenet
         )
     
     def _extract_pattern(self, text: str, pattern: re.Pattern) -> Optional[str]:

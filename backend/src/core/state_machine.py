@@ -259,9 +259,12 @@ class StateMachine:
         
         if best:
             # Store selected torrent info on item  
-            item.file_path = best.info_hash  # Temporarily store hash here
-            
-            logger.info(f"Selected: {best.title[:50]}... (cached: {is_cached})")
+            if best.is_usenet:
+                item.file_path = f"usenet:{best.download_url}"
+                logger.info(f"Selected Usenet: {best.title[:50]}...")
+            else:
+                item.file_path = best.info_hash
+                logger.info(f"Selected Torrent: {best.title[:50]}... (cached: {is_cached})")
             
             item.state = MediaState.SCRAPED
             await session.commit()
@@ -273,18 +276,33 @@ class StateMachine:
         return MediaState.FAILED
     
     async def _download_item(self, item: MediaItem, session: AsyncSession) -> MediaState:
-        """Add torrent to debrid service"""
+        """Add torrent or usenet item to debrid service"""
         logger.info(f"Downloading: {item.title}")
         
-        info_hash = item.file_path  # Retrieved from scrape step
-        if not info_hash:
+        file_path_or_hash = item.file_path  # Retrieved from scrape step
+        if not file_path_or_hash:
             item.state = MediaState.FAILED
             item.last_error = "No torrent hash available"
             await session.commit()
             return MediaState.FAILED
         
+        # Check if Usenet
+        is_usenet = False
+        info_hash = file_path_or_hash
+        download_url = None
+        
+        if file_path_or_hash.startswith("usenet:"):
+            is_usenet = True
+            download_url = file_path_or_hash.split("usenet:", 1)[1]
+            info_hash = None # No hash for Usenet
+            logger.info(f"Adding Usenet item: {download_url[:30]}...")
+        
         # Add to debrid
-        provider, debrid_id = await downloader.add_torrent(info_hash)
+        provider, debrid_id = await downloader.add_torrent(
+            info_hash, 
+            download_url=download_url, 
+            is_usenet=is_usenet
+        )
         
         if provider and debrid_id:
             logger.info(f"Added to {provider}: {debrid_id}")

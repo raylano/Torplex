@@ -130,6 +130,33 @@ class TorboxService:
         
         return None
     
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def add_usenet(self, download_url: str, name: Optional[str] = None) -> Optional[int]:
+        """
+        Add Usenet (NZB) to Torbox via URL.
+        Returns the torrent ID (Torbox uses IDs for both torrent and usenet).
+        """
+        # Torbox uses /api/usenet/createusenetdownload to add via link
+        # However, documentation check: /usenet/createusenetdownload expecting 'link'
+        
+        # Note: Torbox unified API often allows adding NZBs via creating torrent endpoint or specific one
+        # Checking Torbox API docs behavior: /usenet/createusenetdownload
+        
+        result = await self._request(
+            "POST",
+            "/usenet/createusenetdownload",
+            data={"link": download_url}
+        )
+        
+        # If successfully added
+        if result and "usenet_id" in result:
+             # Torbox distinguishes IDs, but for our internal tracking we just need an ID
+            logger.info(f"Torbox: Added Usenet download -> ID: {result['usenet_id']}")
+            return result["usenet_id"]
+        
+        # Fallback/Check: Some versions/wrappers might use different endpoints
+        return None
+    
     async def get_torrent_info(self, torrent_id: int) -> Optional[Dict]:
         """Get torrent info including files"""
         result = await self._request("GET", "/torrents/mylist", params={"id": torrent_id})
@@ -177,6 +204,59 @@ class TorboxService:
         # Get torrent info
         info = await self.get_torrent_info(torrent_id)
         return info
+
+    async def cleanup_stale_torrents(self, max_age_hours: int = 24) -> int:
+        """
+        Delete torrents stuck at 0% progress for longer than max_age_hours.
+        Returns the number of deleted torrents.
+        """
+        from datetime import datetime, timezone
+        from dateutil.parser import parse as parse_datetime
+        
+        if not self.is_configured:
+            return 0
+        
+        torrents = await self.get_torrents()
+        if not torrents:
+            return 0
+        
+        deleted_count = 0
+        now = datetime.now(timezone.utc)
+        
+        for torrent in torrents:
+            try:
+                # Torbox structure might differ, checking common fields
+                progress = torrent.get("progress", 0)
+                
+                # Only check torrents at 0% progress or "error" state
+                if progress != 0 and torrent.get("download_state") != "error":
+                    continue
+                
+                # Parse the added date
+                added_str = torrent.get("created_at") or torrent.get("updated_at")
+                if not added_str:
+                    continue
+                
+                added_time = parse_datetime(added_str)
+                if added_time.tzinfo is None:
+                    added_time = added_time.replace(tzinfo=timezone.utc)
+                
+                # Calculate age in hours
+                age_hours = (now - added_time).total_seconds() / 3600
+                
+                if age_hours > max_age_hours:
+                    torrent_id = torrent.get("id")
+                    name = torrent.get("name", "unknown")[:50]
+                    
+                    success = await self.delete_torrent(torrent_id)
+                    if success:
+                        deleted_count += 1
+                        logger.info(f"Cleaned up stale Torbox torrent (stuck {age_hours:.1f}h): {name}...")
+                        
+            except Exception as e:
+                logger.debug(f"Error checking Torbox torrent for cleanup: {e}")
+        
+        return deleted_count
     
     async def close(self):
         """Close HTTP client"""

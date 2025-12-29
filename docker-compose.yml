@@ -102,7 +102,7 @@ services:
       - SYMLINK_PATH=/mnt/media
       - TZ=${TZ:-Europe/Amsterdam}
     volumes:
-      - /mnt/torplex:/mnt/zurg:rslave
+      - /mnt/combined:/mnt/zurg:rslave
       - ./data/media:/mnt/media
     ports:
       - "8000:8000"
@@ -179,7 +179,7 @@ services:
     volumes:
       - ./config/plex:/config
       - ./data/media:/data/media:rslave
-      - /mnt/torplex:/mnt/zurg:rslave  # Required for symlink resolution
+      - /mnt/combined:/mnt/zurg:rslave  # Required for symlink resolution
 
 networks:
   torplex_net:
