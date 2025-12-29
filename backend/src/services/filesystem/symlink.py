@@ -216,9 +216,30 @@ class SymlinkService:
             # First try: exact match
             path = subdir_path / torrent_name
             
-            # Second try: fuzzy match if exact path doesn't exist
+            # Second try: exact match without file extension (common case: torrent_name has .mkv but folder doesn't)
             if not path.exists():
-                # Search for folders that contain most words from torrent_name
+                # Strip extension and try again
+                torrent_base = torrent_name.rsplit('.', 1)[0] if '.' in torrent_name else torrent_name
+                path_no_ext = subdir_path / torrent_base
+                if path_no_ext.exists():
+                    logger.debug(f"Found folder without extension: {path_no_ext.name}")
+                    path = path_no_ext
+            
+            # Third try: fuzzy match if exact path doesn't exist
+            if not path.exists():
+                # Extract episode number from torrent_name for strict validation
+                # This prevents matching "S3 - 04" when looking for "S3 - 06"
+                episode_in_torrent = None
+                ep_match = re.search(rf's0*{season}\s*[-_.\s]*\s*(?:e)?0*(\d+)', torrent_name.lower())
+                if ep_match:
+                    episode_in_torrent = int(ep_match.group(1))
+                else:
+                    # Try absolute episode number pattern for anime
+                    ep_match = re.search(rf'-\s*0*(\d+)(?:\s|$|\.)', torrent_name)
+                    if ep_match:
+                        episode_in_torrent = int(ep_match.group(1))
+                
+                # Search for folders that match
                 best_match = None
                 best_score = 0
                 
@@ -229,6 +250,23 @@ class SymlinkService:
                         
                         item_norm = normalize(item.name)
                         item_words = set(item_norm.split())
+                        
+                        # CRITICAL: If we know the episode number, the folder MUST contain it
+                        if episode_in_torrent is not None:
+                            # Check if folder contains this exact episode number
+                            folder_ep = None
+                            folder_ep_match = re.search(rf's0*{season}\s*[-_.\s]*\s*(?:e)?0*(\d+)', item.name.lower())
+                            if folder_ep_match:
+                                folder_ep = int(folder_ep_match.group(1))
+                            else:
+                                # Try absolute episode number for anime folders
+                                folder_ep_match = re.search(rf'-\s*0*(\d+)(?:\s|$)', item.name)
+                                if folder_ep_match:
+                                    folder_ep = int(folder_ep_match.group(1))
+                            
+                            # Skip this folder if episode number doesn't match
+                            if folder_ep != episode_in_torrent:
+                                continue
                         
                         # Calculate word overlap score
                         if torrent_words and item_words:

@@ -127,7 +127,7 @@ async def sync_plex_watchlist():
                     result = await session.execute(
                         select(MediaItem).where(MediaItem.imdb_id == imdb_id)
                     )
-                    existing = result.scalar_one_or_none()
+                    existing = result.scalars().first()
                 
                 # If no IMDB ID or not found, check by title + year
                 if not existing:
@@ -140,7 +140,7 @@ async def sync_plex_watchlist():
                             )
                         )
                     )
-                    existing = result.scalar_one_or_none()
+                    existing = result.scalars().first()
                 
                 if existing:
                     continue  # Already tracking this
