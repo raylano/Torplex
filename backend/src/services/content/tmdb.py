@@ -126,19 +126,24 @@ class TMDBService:
             return {}
             
         # 2. Find "Absolute Order" group
+        # TMDB Episode Group Types: 1=Original Air Date, 2=Absolute Order, 3=DVD, 4=Digital, 5=Story Arc, 6=Production, 7=TV
         absolute_group_id = None
-        for group in groups["results"]:
-            # Usually named "Absolute Order" or type 2 maybe?
-            # group: {'description': '', 'episode_count': 1122, 'group_count': 1, 'id': '5b59...', 'name': 'Absolute Order', 'network': ..., 'type': 2}
-            if "absolute" in group.get("name", "").lower():
-                absolute_group_id = group.get("id")
-                break
         
-        if not absolute_group_id and groups["results"]:
-             # Fallback to first group if many? Usually first is meaningful or look for biggest count
-             # But risky. Anime usually has explicit absolute order.
-             pass
-             
+        # Priority 1: Type 2 (Absolute Order)
+        for group in groups["results"]:
+            if group.get("type") == 2:
+                absolute_group_id = group.get("id")
+                logger.info(f"TMDB: Found Type 2 (Absolute) group: {group.get('name')} ({absolute_group_id})")
+                break
+                
+        # Priority 2: Name contains "Absolute"
+        if not absolute_group_id:
+            for group in groups["results"]:
+                if "absolute" in group.get("name", "").lower():
+                    absolute_group_id = group.get("id")
+                    logger.info(f"TMDB: Found 'Absolute' name group: {group.get('name')} ({absolute_group_id})")
+                    break
+        
         if not absolute_group_id:
             logger.debug(f"TMDB: No Absolute Order group found for {tmdb_id}")
             return {}

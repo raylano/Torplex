@@ -167,10 +167,12 @@ class SymlinkService:
         logger.info(f"Found match: {best_folder.name} (score: {best_score})")
         return best_file if best_file else best_folder
     
-    def find_episode_in_torrent(self, torrent_name: str, season: int, episode: int) -> Optional[Path]:
+    def find_episode_in_torrent(self, torrent_name: str, season: int, episode: int, 
+                              absolute_episode_number: Optional[int] = None) -> Optional[Path]:
         """
         Find specific episode file within a known torrent folder.
         Uses the stored torrent_name for direct path construction.
+        Supports absolute episode numbering for Anime.
         """
         import re
         
@@ -188,7 +190,16 @@ class SymlinkService:
             rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", " 01 "
         ]
         
-        logger.info(f"Searching for S{season:02d}E{episode:02d} in torrent: {torrent_name}")
+        # Add absolute numbering patterns if available
+        if absolute_episode_number:
+            logger.info(f"Using absolute episode number {absolute_episode_number} for matching")
+            patterns.extend([
+                rf'(?:e|ep|episode)\.?\s*0*{absolute_episode_number}\b',     # Episode 328
+                rf'(?:^|[\s\-\.\[\(])0*{absolute_episode_number}(?:[\s\-\.\]\)]|$)', # " - 328 ", "[328]"
+                rf'^{absolute_episode_number}\b', # Starts with 328 (e.g. "328 - Title.mkv")
+            ])
+        
+        logger.info(f"Searching for S{season:02d}E{episode:02d} (Abs: {absolute_episode_number}) in torrent: {torrent_name}")
         
         video_exts = {'.mkv', '.mp4', '.avi', '.mov', '.m4v'}
         found_files = []
