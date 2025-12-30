@@ -322,13 +322,48 @@ class ProwlarrScraper:
             
             if has_good_match:
                 logger.info(f"Prowlarr: Found good match (Dub/Dual) on {indexer_name}, stopping sequential search.")
-                return all_results
+                return self._filter_results(all_results, season, episode, absolute_episode_number)
                 
             if len(all_results) >= 10:
                 logger.info(f"Prowlarr: Found {len(all_results)} results, stopping sequential search.")
-                return all_results
+                return self._filter_results(all_results, season, episode, absolute_episode_number)
                 
-        return all_results
+        return self._filter_results(all_results, season, episode, absolute_episode_number)
+
+    def _filter_results(self, results: List[TorrentResult], season: int, episode: int, absolute_number: Optional[int]) -> List[TorrentResult]:
+        """Strictly filter results to ensure they match the requested episode"""
+        filtered = []
+        for r in results:
+            if self._is_valid_match(r.title, season, episode, absolute_number):
+                filtered.append(r)
+            else:
+                logger.debug(f"Prowlarr: Discarded invalid match: {r.title}")
+        return filtered
+
+    def _is_valid_match(self, title: str, season: int, episode: int, absolute_number: Optional[int]) -> bool:
+        """Check if title strictly matches the target episode"""
+        import re
+        title_lower = title.lower()
+        
+        # 1. Absolute Number Check (Highest Priority)
+        # MUST match the number as a whole word (e.g. "109" matches "109" but NOT "1097")
+        if absolute_number:
+            # Check for "109" bounded by non-digits
+            if re.search(rf'(?<!\d){absolute_number}(?!\d)', title_lower):
+                 return True
+        
+        # 2. Standard SxxExx Check
+        # Must match S4E109, 4x109, etc.
+        # Strict checking:
+        if re.search(rf's0*{season}\s*e0*{episode}(?!\d)', title_lower):
+            return True
+        if re.search(rf'\b{season}x{episode:02d}\b', title_lower):
+            return True
+            
+        # 3. Special Case: Anime Cour 2 (e.g. "Title 13" for S01E13)
+        # Handled by absolute number check usually, but if absolute_number wasn't passed...
+        
+        return False
     
     async def close(self):
         """Close HTTP client"""
