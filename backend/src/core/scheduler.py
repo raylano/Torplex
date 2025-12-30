@@ -93,6 +93,11 @@ async def process_pending_episodes():
             try:
                 new_state = await episode_processor.process_episode(episode, show, session)
                 logger.debug(f"{show.title} S{episode.season_number}E{episode.episode_number}: -> {new_state}")
+                
+                # Add delay to respect rate limits (Torbox/Providers)
+                import asyncio
+                await asyncio.sleep(2)
+                
             except Exception as e:
                 logger.error(f"Error processing episode: {e}")
 
