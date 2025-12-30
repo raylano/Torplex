@@ -140,10 +140,35 @@ class TorboxService:
         try:
             # 1. Download NZB content locally
             logger.debug(f"Downloading NZB from Prowlarr: {download_url}")
-            # Use a separate client for the download to avoid base_url issues + untrusted certs
+            # Use a separate client for the download
             async with httpx.AsyncClient(verify=False, timeout=30.0) as dl_client:
-                nzb_resp = await dl_client.get(download_url, follow_redirects=True)
-                nzb_resp.raise_for_status()
+                # Handle redirects manually to catch magnet links
+                resp = await dl_client.get(download_url, follow_redirects=False)
+                
+                # Check for redirect to magnet
+                if resp.status_code in (301, 302, 303, 307, 308) and "location" in resp.headers:
+                    location = resp.headers["location"]
+                    if location.startswith("magnet:"):
+                        logger.info(f"Prowlarr redirected to magnet link. Switching to add_magnet.")
+                        # Extract info_hash from magnet? Or just add raw magnet?
+                        # Torbox add_magnet expects info_hash usually, but let's check if we can add by magnet string
+                        # actually add_magnet impl constructs magnet from hash.
+                        # We should create a new method or extract hash.
+                        
+                        import re
+                        hash_match = re.search(r'btih:([a-zA-Z0-9]+)', location)
+                        if hash_match:
+                            info_hash = hash_match.group(1)
+                            return await self.add_magnet(info_hash, name)
+                        else:
+                            logger.error("Could not extract hash from magnet link")
+                            return None
+                            
+                    # Follow HTTP redirect
+                    resp = await dl_client.get(location, follow_redirects=True)
+                
+                resp.raise_for_status()
+                nzb_resp = resp
                 
                 # Determine filename
                 import cgi
