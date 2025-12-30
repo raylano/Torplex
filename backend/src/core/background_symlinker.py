@@ -4,7 +4,7 @@ from typing import List
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 
-from src.core.database import get_db
+from src.database import get_db
 from src.models import MediaItem, MediaState, Episode, EpisodeState, MediaType
 from src.services.filesystem.symlink import symlink_service
 
