@@ -226,34 +226,109 @@ class ProwlarrScraper:
         search_query = f"{query} {year}" if year else query
         return await self.search(search_query, categories=[2000], imdb_id=imdb_id)
 
-    async def search_tv(self, title: str, season: int, episode: int, imdb_id: str = None) -> List[TorrentResult]:
+    async def search_tv(
+        self, 
+        title: str, 
+        season: int, 
+        episode: int, 
+        imdb_id: str = None,
+        absolute_episode_number: int = None
+    ) -> List[TorrentResult]:
         """
-        Search for a TV episode.
-        Includes heuristics for Anime Cour 2 mapping (e.g. S01E13 -> S02E01).
+        Search for a TV episode sequentially across indexers.
+        Includes heuristics for Anime Cour 2 mapping, Absolute Numbering, and early exit optimization.
         """
-        # 5000 = TV, 5070 = Anime
+        # Get indexers first
+        indexers = await self.get_indexers()
+        
+        if not indexers:
+            logger.warning("No indexers configured in Prowlarr")
+            return []
+            
+        # Sort by priority
+        sorted_indexers = sorted(indexers, key=lambda x: x.get("priority", 25))
+        
+        all_results = []
+        
+        # We need to construct queries first
+        queries = []
+        
+        # 1. Absolute Numbering (Highest Priority for Anime if known)
+        if absolute_episode_number:
+            logger.info(f"Prowlarr: Searching with Absolute Number {absolute_episode_number} for {title}")
+            # Try specific "Title 145" format
+            queries.append(f"{title} {absolute_episode_number:02d}")
+            # Try "Title - 145" format
+            queries.append(f"{title} - {absolute_episode_number:02d}")
+        
+        # 2. Standard SxxExx search
+        s_ex = f"S{season:02d}E{episode:02d}"
+        queries.append(f"{title} {s_ex}")
+        
+        # 3. Anime Fallback Logic pre-calculation (guessing if absolute num missing)
+        is_anime_cour2 = season == 1 and episode > 12
+        if is_anime_cour2 and not absolute_episode_number:
+            # Absolute Numbering guess
+            queries.append(f"{title} {episode:02d}")
+            # Season 2 Mapping
+            queries.append(f"{title} S02E{episode-12:02d}")
+            
+        # Categories: 5000 (TV), 5070 (Anime)
         categories = [5000, 5070]
         
-        # Standard SxxExx search
-        s_ex = f"S{season:02d}E{episode:02d}"
-        query = f"{title} {s_ex}"
+        logger.info(f"Sequential Prowlarr Search: {len(sorted_indexers)} indexers, {len(queries)} queries")
         
-        results = await self.search(query, categories=categories, imdb_id=imdb_id)
-        
-        # ANIME FALLBACK LOGIC
-        # If no results found, and it looks like a Cour 2 situation (Season 1, Ep > 12)
-        if not results and season == 1 and episode > 12:
-            logger.info(f"Prowlarr: No results for {s_ex}, trying Anime Cour 2 fallbacks...")
+        for indexer in sorted_indexers:
+            indexer_id = indexer.get("id")
+            indexer_name = indexer.get("name")
             
-            # Fallback 1: Absolute Numbering (e.g. "Dan Da Dan 13")
-            # We enforce 2+ digits padding
-            abs_query = f"{title} {episode:02d}"
-            logger.debug(f"Trying absolute search: {abs_query}")
-            abs_results = await self.search(abs_query, categories=[5070], imdb_id=imdb_id)
-            if abs_results:
-                results.extend(abs_results)
+            layer_results = []
+            
+            for q in queries:
+                try:
+                    params = {
+                        "query": q,
+                        "type": "search",
+                        "categories": categories,
+                        "indexerIds": [indexer_id]
+                    }
+                    
+                    url = f"{self.url}/api/v1/search"
+                    resp = await self.client.get(url, headers=self.headers, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    
+                    for item in data:
+                        res = self._parse_result(item)
+                        if res:
+                            layer_results.append(res)
+                            
+                except Exception as e:
+                    logger.debug(f"Indexer {indexer_name} failed: {e}")
+                    continue
+            
+            if not layer_results:
+                continue
                 
-        return results
+            all_results.extend(layer_results)
+            
+            # EARLY EXIT CHECK
+            # Strict logic: "gebruik nogsteeds dubbel / english / dual audio als drijfveer"
+            has_good_match = False
+            for r in layer_results:
+                if r.is_dual_audio or r.is_dubbed:
+                    has_good_match = True
+                    break
+            
+            if has_good_match:
+                logger.info(f"Prowlarr: Found good match (Dub/Dual) on {indexer_name}, stopping sequential search.")
+                return all_results
+                
+            if len(all_results) >= 10:
+                logger.info(f"Prowlarr: Found {len(all_results)} results, stopping sequential search.")
+                return all_results
+                
+        return all_results
     
     async def close(self):
         """Close HTTP client"""

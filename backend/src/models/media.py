@@ -172,6 +172,7 @@ class Episode(Base):
     title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     overview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     air_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    absolute_episode_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
     # State
     state: Mapped[MediaState] = mapped_column(String(20), default=MediaState.REQUESTED, index=True)

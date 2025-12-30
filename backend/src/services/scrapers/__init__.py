@@ -52,7 +52,8 @@ async def scrape_episode(
     imdb_id: str, 
     season: int, 
     episode: int, 
-    title: str = ""
+    title: str = "",
+    absolute_episode_number: int = None
 ) -> List[TorrentResult]:
     """
     Scrape all sources for a TV episode.
@@ -80,7 +81,13 @@ async def scrape_episode(
     # Prowlarr (tertiary - if configured)
     if prowlarr_scraper.is_configured:
         try:
-            results = await prowlarr_scraper.search_tv(title, season=season, episode=episode, imdb_id=imdb_id)
+            results = await prowlarr_scraper.search_tv(
+                title, 
+                season=season, 
+                episode=episode, 
+                imdb_id=imdb_id,
+                absolute_episode_number=absolute_episode_number
+            )
             all_results.extend(results)
             if results:
                 logger.info(f"Prowlarr found {len(results)} results for S{season:02d}E{episode:02d}")

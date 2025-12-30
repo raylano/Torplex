@@ -365,33 +365,7 @@ class TorboxService:
     # USENET METHODS
     # ==========================================================================
     
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    async def add_usenet(self, link: str, name: Optional[str] = None) -> Optional[int]:
-        """
-        Add a usenet download from NZB link.
-        Supports direct NZB URLs from indexers like NZBgeek, Spottarr, etc.
-        Returns the usenet download ID if successful.
-        """
-        form_data = {"link": link}
-        if name:
-            form_data["name"] = name
-        
-        result = await self._request(
-            "POST",
-            "/usenet/createusenetdownload",
-            data=form_data
-        )
-        
-        if result and "usenetdownload_id" in result:
-            logger.info(f"Torbox: Added usenet download -> ID: {result['usenetdownload_id']}")
-            return result["usenetdownload_id"]
-        
-        # Handle alternative response format
-        if result and "id" in result:
-            logger.info(f"Torbox: Added usenet download -> ID: {result['id']}")
-            return result["id"]
-        
-        return None
+
     
     async def get_usenet_info(self, usenet_id: int) -> Optional[Dict]:
         """Get usenet download info including files"""

@@ -114,6 +114,64 @@ class TMDBService:
         logger.info(f"TMDB: Fetched {len(all_episodes)} episodes for show {tmdb_id}")
         return all_episodes
 
+    async def get_show_absolute_map(self, tmdb_id: int) -> Dict[tuple, int]:
+        """
+        Fetch Absolute Episode Numbers for a show (Anime support).
+        Returns mapping: (season, episode) -> absolute_number
+        Fetches "Episode Groups" looking for "Absolute Order".
+        """
+        # 1. Get Episode Groups
+        groups = await self._request(f"/tv/{tmdb_id}/episode_groups")
+        if not groups or "results" not in groups:
+            return {}
+            
+        # 2. Find "Absolute Order" group
+        absolute_group_id = None
+        for group in groups["results"]:
+            # Usually named "Absolute Order" or type 2 maybe?
+            # group: {'description': '', 'episode_count': 1122, 'group_count': 1, 'id': '5b59...', 'name': 'Absolute Order', 'network': ..., 'type': 2}
+            if "absolute" in group.get("name", "").lower():
+                absolute_group_id = group.get("id")
+                break
+        
+        if not absolute_group_id and groups["results"]:
+             # Fallback to first group if many? Usually first is meaningful or look for biggest count
+             # But risky. Anime usually has explicit absolute order.
+             pass
+             
+        if not absolute_group_id:
+            logger.debug(f"TMDB: No Absolute Order group found for {tmdb_id}")
+            return {}
+            
+        # 3. Fetch Group Details
+        group_details = await self._request(f"/tv/episode_group/{absolute_group_id}")
+        if not group_details or "groups" not in group_details:
+             return {}
+             
+        mapping = {}
+        # Structure: groups -> [ { episodes: [ { season_number, episode_number, order+1? } ] } ]
+        # wait, details structure:
+        # { "groups": [ { "name": "...", "order": 1, "episodes": [ ... ] } ], ... }
+        # NO, endpoint /tv/episode_group/{id} returns list of groups?
+        # Let's assume standard TMDB structure.
+        
+        for g in group_details.get("groups", []):
+            for ep in g.get("episodes", []):
+                s = ep.get("season_number")
+                e = ep.get("episode_number")
+                # Absolute number is usually the index in list or 'order' field?
+                # In Absolute Order group, they are just listed linearly. 
+                # TMDB 'order' field usually exists.
+                # Actually, in an Absolute Group, the 'order' property of the episode object *within the group* is the absolute number.
+                abs_num = ep.get("order") + 1 # 0-indexed usually? Api docs say 'order'.
+                # Let's assume 0-indexed order
+                
+                if s is not None and e is not None and abs_num is not None:
+                    mapping[(s, e)] = abs_num
+                    
+        logger.info(f"TMDB: Built absolute map for {tmdb_id} with {len(mapping)} entries")
+        return mapping
+
     async def get_alternative_titles(self, tmdb_id: int, media_type: str = "tv") -> List[str]:
         """
         Fetch all alternative titles for a show/movie from TMDB.

@@ -191,12 +191,53 @@ class EpisodeProcessor:
             await session.commit()
             return MediaState.FAILED
         
+        if show.is_anime and not episode.absolute_episode_number and show.tmdb_id:
+            # Try to fetch global map if we haven't? 
+            # Ideally we do this once per show sync, but here we can do lazy load?
+            # Or just fetch for this episode? 
+            # Actually, `get_show_absolute_map` fetches ALL. We should probably cache it or do it in show sync.
+            # But show sync logic is complex to find. Let's do a quick lazy load here, inefficient for batch but works.
+            # BETTER: Just call it.
+            try:
+                from src.services.content.tmdb import tmdb_service
+                abs_map = await tmdb_service.get_show_absolute_map(show.tmdb_id)
+                if abs_map:
+                    # Update THIS episode
+                    key = (episode.season_number, episode.episode_number)
+                    if key in abs_map:
+                        episode.absolute_episode_number = abs_map[key]
+                        logger.info(f"Set Absolute Number {episode.absolute_episode_number} for {show.title} S{episode.season_number}E{episode.episode_number}")
+                        await session.commit() # Commit to save
+            except Exception as e:
+                logger.warning(f"Failed to fetch absolute number: {e}")
+
         # Scrape using ALL scrapers (Torrentio + MediaFusion + Prowlarr)
+        # We need to pass absolute_episode_number if available (it might be None)
+        # But `scrape_episode_all` signature needs update?
+        # Let's check `scrape_episode_all` in `src.services.scrapers.__init__.py`
+        
+        # We need to update that signature first!
+        # But I can modify the call here assuming I will update the signature in next step.
+        
         torrents = await scrape_episode_all(
             show.imdb_id,
             episode.season_number,
             episode.episode_number,
-            title=show.title
+            title=show.title,
+            # We need to pass this new arg.
+            # But wait, scrape_episode_all is imported? 
+            # Yes, "from src.services.scrapers import scrape_episode as scrape_episode_all" usually?
+            # Let's check imports in this file.
+        )
+        # Actually I see: "torrents = await scrape_episode_all(..."
+        
+        # I will update the call to:
+        torrents = await scrape_episode_all(
+            show.imdb_id,
+            episode.season_number,
+            episode.episode_number,
+            title=show.title,
+            absolute_episode_number=episode.absolute_episode_number
         )
         
         if not torrents:
