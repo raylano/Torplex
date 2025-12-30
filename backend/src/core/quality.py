@@ -80,11 +80,8 @@ class QualityRanker:
         "Anime Time", "Anime Land", "HorribleSubs",
     ]
     
-<<<<<<< HEAD
     # Minimum seeders required (0-seeder torrents filtered unless cached)
     MIN_SEEDERS = 1
-=======
->>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
     
     def rank_torrents(
         self,
@@ -110,22 +107,20 @@ class QualityRanker:
         # Filter out 0-seeder torrents UNLESS they are cached
         filtered_torrents = []
         for torrent in torrents:
-<<<<<<< HEAD
-            info_hash = torrent.info_hash.lower()
-            is_cached = info_hash in cached_providers and cached_providers[info_hash]
+            info_hash = torrent.info_hash.lower() if torrent.info_hash else None
+            is_cached = False
+            if info_hash and info_hash in cached_providers and cached_providers[info_hash]:
+                is_cached = True
             
-            # Allow if: cached OR has enough seeders OR seeders is unknown (None)
-            if is_cached or torrent.seeders is None or torrent.seeders >= self.MIN_SEEDERS:
+            # Allow if: cached OR Usenet OR has enough seeders OR seeders is unknown (None)
+            if is_cached or getattr(torrent, "is_usenet", False) or torrent.seeders is None or torrent.seeders >= self.MIN_SEEDERS:
                 filtered_torrents.append(torrent)
             else:
                 logger.debug(f"Filtered out 0-seeder torrent: {torrent.title[:40]}...")
         
         scored_torrents = []
         for torrent in filtered_torrents:
-            score = self.calculate_score(torrent, is_anime, cached_providers)
-=======
             score = self.calculate_score(torrent, is_anime, cached_providers, dubbed_only)
->>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
             scored_torrents.append((torrent, score))
         
         # Sort by total score, descending
@@ -186,29 +181,13 @@ class QualityRanker:
             else:
                 score.size_score = 10  # Suspiciously small
         
-<<<<<<< HEAD
-        # Seeders score - heavily penalize 0-seeder uncached torrents
-        info_hash = torrent.info_hash.lower()
-        is_cached = info_hash in cached_providers and cached_providers[info_hash]
-=======
         # Seeders score - significant boost to prefer healthy torrents
         # Only relevant if NOT cached or Usenet (cached/usenet are instant) (Usenet usually reports 0 seeds)
->>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
         
         if torrent.seeders is not None:
             if torrent.seeders >= 100:
                 score.seeders_score = 200
             elif torrent.seeders >= 50:
-<<<<<<< HEAD
-                score.seeders_score = 40
-            elif torrent.seeders >= 10:
-                score.seeders_score = 30
-            elif torrent.seeders >= 1:
-                score.seeders_score = 20
-            elif torrent.seeders == 0 and not is_cached:
-                # Heavy penalty for 0-seeder non-cached torrents
-                score.seeders_score = -5000
-=======
                 score.seeders_score = 150
             elif torrent.seeders >= 20:
                 score.seeders_score = 100
@@ -216,16 +195,17 @@ class QualityRanker:
                 score.seeders_score = 50
             elif torrent.seeders > 0:
                 # 1-4 seeders: No bonus, but apply penalty if not cached
-                if not is_cached and not torrent.is_usenet:
+                is_usenet = getattr(torrent, "is_usenet", False)
+                if not is_cached and not is_usenet:
                     score.seeders_score = -2000 # Discourage risky/slow torrents
             else:
                 # 0 seeders
-                if not is_cached and not torrent.is_usenet:
+                is_usenet = getattr(torrent, "is_usenet", False)
+                if not is_cached and not is_usenet:
                     score.seeders_score = -10000 # Nuked. Dead torrent.
-        elif not is_cached and not torrent.is_usenet:
+        elif not is_cached and not getattr(torrent, "is_usenet", False):
              # Unknown seeds on uncached torrent -> assume bad
              score.seeders_score = -2000
->>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
         
         # Calculate base total
         score.total = (
