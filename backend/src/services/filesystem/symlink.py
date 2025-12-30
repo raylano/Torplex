@@ -251,7 +251,8 @@ class SymlinkService:
                         item_norm = normalize(item.name)
                         item_words = set(item_norm.split())
                         
-                        # CRITICAL: If we know the episode number, the folder MUST contain it
+                        # CRITICAL: If we know the episode number, the folder SHOULD contain it,
+                        # UNLESS it is a Season Pack folder (e.g. "Season 01")
                         if episode_in_torrent is not None:
                             # Check if folder contains this exact episode number
                             folder_ep = None
@@ -264,9 +265,25 @@ class SymlinkService:
                                 if folder_ep_match:
                                     folder_ep = int(folder_ep_match.group(1))
                             
-                            # Skip this folder if episode number doesn't match
-                            if folder_ep != episode_in_torrent:
+                            # If folder has episode number, it MUST match
+                            if folder_ep is not None and folder_ep != episode_in_torrent:
                                 continue
+                                
+                            # If folder has NO episode number, check if it's a Season Pack folder
+                            # (matches "Season X", "Complete", "Batch", or just "Show Name S01")
+                            if folder_ep is None:
+                                is_season_pack = False
+                                if re.search(rf'season\s*0*{season}', item.name.lower()):
+                                    is_season_pack = True
+                                elif re.search(rf's0*{season}\b(?!e)', item.name.lower()):
+                                    is_season_pack = True
+                                elif 'complete' in item.name.lower() or 'batch' in item.name.lower():
+                                    is_season_pack = True
+                                    
+                                if not is_season_pack:
+                                    # If not a season pack and no episode number, it's ambiguous. 
+                                    # But we might still want to check it if word score is high.
+                                    pass
                         
                         # Calculate word overlap score
                         if torrent_words and item_words:

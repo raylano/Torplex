@@ -160,7 +160,10 @@ class QualityRanker:
         
         # Seeders score
         # Seeders score - significant boost to prefer healthy torrents
-        if torrent.seeders:
+        # Only relevant if NOT cached or Usenet (cached/usenet are instant)
+        start_penalty = -500 if (not is_cached and not torrent.is_usenet) else 0
+        
+        if torrent.seeders is not None:
             if torrent.seeders >= 100:
                 score.seeders_score = 200
             elif torrent.seeders >= 50:
@@ -169,8 +172,15 @@ class QualityRanker:
                 score.seeders_score = 100
             elif torrent.seeders >= 5:
                 score.seeders_score = 50
+            elif torrent.seeders > 0:
+                # 1-4 seeders: No bonus, but apply penalty if not cached
+                if not is_cached and not torrent.is_usenet:
+                    score.seeders_score = -500 # Discourage dead torrents
             else:
-                score.seeders_score = 0 # Penalty for very low seeders
+                score.seeders_score = -1000 # 0 seeders is very bad
+        elif not is_cached and not torrent.is_usenet:
+             # Unknown seeds on uncached torrent -> assume bad
+             score.seeders_score = -500
         
         # Calculate base total
         score.total = (
