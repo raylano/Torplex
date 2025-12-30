@@ -227,6 +227,16 @@ class SymlinkService:
             # First try: exact match
             path = subdir_path / torrent_name
             
+            # FORCE REFRESH: Zurg/Rclone sometimes returns cached empty listings.
+            # Explicitly listing the parent directory forces a kernel/fuse refresh.
+            try:
+                # This listing creates fs noise but ensures the mount is fresh
+                _ = list(os.scandir(str(subdir_path)))
+                if path.exists():
+                     _ = list(os.scandir(str(path)))
+            except Exception:
+                pass
+
             # Second try: exact match without file extension (common case: torrent_name has .mkv but folder doesn't)
             if not path.exists():
                 # Strip extension and try again
@@ -447,6 +457,12 @@ class SymlinkService:
             if not search_path.exists():
                 continue
             
+            # FORCE REFRESH: Explicitly list directory to update Zurg/fuse cache
+            try:
+                _ = list(os.scandir(str(search_path)))
+            except Exception:
+                pass
+
             for item in search_path.iterdir():
                 item_name_lower = item.name.lower()
                 

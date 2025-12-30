@@ -146,6 +146,16 @@ class TMDBService:
         
         if not absolute_group_id:
             logger.debug(f"TMDB: No Absolute Order group found for {tmdb_id}")
+            # FALLBACK: For Season 1, absolute number usually equals episode number.
+            # This is critical for new anime (like Dan Da Dan) that don't have groups yet.
+            # We return a partial map for Season 1 only.
+            fallback_map = {}
+            # We don't have episode count here easily, but we can't iterate.
+            # Actually, this method is called by get_all_episodes? No, separately.
+            # We can't build a full map without fetching episodes.
+            # BUT, the caller (episode_processor) can handle this logic!
+            # Or we can return None/Empty and let caller decide?
+            # Better: let caller handle "If Season 1 and Abs is None -> use Ep Num"
             return {}
             
         # 3. Fetch Group Details

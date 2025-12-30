@@ -417,6 +417,15 @@ class EpisodeProcessor:
                         episode.absolute_episode_number = abs_map[key]
                         await session.commit()
                         logger.info(f"Lazily set Absolute Number {episode.absolute_episode_number} for {show.title} S{episode.season_number}E{episode.episode_number}")
+                
+                # FALLBACK FOR SEASON 1:
+                # If no map found (new anime), and it's Season 1, assume Abs = Ep.
+                # This fixes 'Dan Da Dan' and other new shows.
+                elif episode.season_number == 1 and not episode.absolute_episode_number:
+                     episode.absolute_episode_number = episode.episode_number
+                     await session.commit()
+                     logger.info(f"Lazily set Absolute Number {episode.absolute_episode_number} (Season 1 Fallback) for {show.title}")
+
              except Exception as e:
                 logger.warning(f"Failed to lazy fetch absolute number: {e}")
         
