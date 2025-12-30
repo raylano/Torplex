@@ -81,22 +81,43 @@ class EpisodeProcessor:
                 pass  # TODO: Implement proper absolute conversion if needed
             
             if existing_file:
-                # File exists! Create as DOWNLOADED (ready for symlink!)
-                # Extract the parent folder name as "torrent_name" so symlink step can find it
-                parent_folder = existing_file.parent.name if existing_file.parent else existing_file.name
-                episode = Episode(
-                    show_id=show.id,
-                    season_number=season,
-                    episode_number=episode_num,
-                    title=ep_data.get("title"),
-                    overview=ep_data.get("overview"),
-                    air_date=ep_data.get("air_date"),
-                    state=MediaState.DOWNLOADED,  # Ready for symlink!
-                    file_path=str(existing_file),
-                    torrent_name=parent_folder,  # Store folder name for symlink lookup
-                )
-                pre_filled += 1
-            else:
+                # File exists! 
+                
+                # ANIME UPGRADE LOGIC:
+                # If it's Anime, user prefers Dual/Dubbed. 
+                # If existing file doesn't explicitly say "Dub" or "Dual", ignore it so we scrape a better one.
+                is_dubbed_file = False
+                if show.is_anime:
+                    import re
+                    # Simple regex for dubbed/dual audio indicators
+                    if re.search(r'(dub|dual|multi|english)', existing_file.name, re.IGNORECASE):
+                        is_dubbed_file = True
+                    
+                    if not is_dubbed_file:
+                        logger.info(f"Ignoring existing file for {show.title} S{season}E{episode_num}: Not Dubbed/Dual ({existing_file.name})")
+                        # Skip strictly - this forces scraping
+                        # We treat it as if file doesn't exist
+                        existing_file = None
+                
+                if existing_file:
+                    # Create as DOWNLOADED (ready for symlink!)
+                    # Extract the parent folder name as "torrent_name" so symlink step can find it
+                    parent_folder = existing_file.parent.name if existing_file.parent else existing_file.name
+                    episode = Episode(
+                        show_id=show.id,
+                        season_number=season,
+                        episode_number=episode_num,
+                        title=ep_data.get("title"),
+                        overview=ep_data.get("overview"),
+                        air_date=ep_data.get("air_date"),
+                        state=MediaState.DOWNLOADED,  # Ready for symlink!
+                        file_path=str(existing_file),
+                        torrent_name=parent_folder,  # Store folder name for symlink lookup
+                    )
+                    pre_filled += 1
+            
+            if not existing_file:
+                # File doesn't exist OR was rejected (re-scrape needed)
                 # File doesn't exist, needs scraping
                 episode = Episode(
                     show_id=show.id,
