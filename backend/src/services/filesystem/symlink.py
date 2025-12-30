@@ -231,9 +231,12 @@ class SymlinkService:
             # Explicitly listing the parent directory forces a kernel/fuse refresh.
             try:
                 # This listing creates fs noise but ensures the mount is fresh
-                _ = list(os.scandir(str(subdir_path)))
+                import asyncio
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, lambda: list(os.scandir(str(subdir_path))))
+                
                 if path.exists():
-                     _ = list(os.scandir(str(path)))
+                     await loop.run_in_executor(None, lambda: list(os.scandir(str(path))))
             except Exception:
                 pass
 
@@ -458,8 +461,12 @@ class SymlinkService:
                 continue
             
             # FORCE REFRESH: Explicitly list directory to update Zurg/fuse cache
+            # Run in thread pool to avoid blocking the event loop
             try:
-                _ = list(os.scandir(str(search_path)))
+                import asyncio
+                loop = asyncio.get_running_loop()
+                # Wrap the blocking I/O
+                await loop.run_in_executor(None, lambda: list(os.scandir(str(search_path))))
             except Exception:
                 pass
 
