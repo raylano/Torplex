@@ -81,51 +81,76 @@ async def process_pending_items():
                 logger.error(f"Error processing {item_title}: {e}")
 
 
+from sqlalchemy.orm.exc import StaleDataError, ObjectDeletedError
+
+# ... imports ...
+
+
 async def process_episodes_scrape():
     """JOB: Scrape new episodes (Fast Discovery)"""
     async with async_session() as session:
         # Increased limit for throughput
-        pending = await episode_processor.get_episodes_to_scrape(session, limit=20)
-        if pending:
-            logger.info(f"🔎 Scraping {len(pending)} episodes...")
+        try:
+            pending = await episode_processor.get_episodes_to_scrape(session, limit=20)
+            if pending:
+                logger.info(f"🔎 Scraping {len(pending)} episodes...")
+        except Exception as e:
+            logger.error(f"Error fetching scrape items: {e}")
+            return
         
         for episode, show in pending:
             try:
                 await episode_processor.process_episode(episode, show, session)
-                # Removed sleep to maximize CPU usage as requested
+            except (StaleDataError, ObjectDeletedError):
+                logger.warning(f"Item vanished during scrape (concurrent delete?): {show.title}")
+                await session.rollback()
             except Exception as e:
                 logger.error(f"Scrape error: {e}")
+                await session.rollback()
 
 async def process_episodes_download():
     """JOB: Add to Debrid (Safe Speed)"""
     async with async_session() as session:
         # Increased limit
-        pending = await episode_processor.get_episodes_to_download(session, limit=20)
-        if pending:
-            logger.info(f"📥 Downloading {len(pending)} episodes...")
+        try:
+            pending = await episode_processor.get_episodes_to_download(session, limit=20)
+            if pending:
+                logger.info(f"📥 Downloading {len(pending)} episodes...")
+        except Exception as e:
+             logger.error(f"Error fetching download items: {e}")
+             return
         
         for episode, show in pending:
             try:
                 await episode_processor.process_episode(episode, show, session)
-                # Removed sleep - APIs are robust enough
+            except (StaleDataError, ObjectDeletedError):
+                logger.warning(f"Item vanished during download (concurrent delete?): {show.title}")
+                await session.rollback()
             except Exception as e:
                 logger.error(f"Download error: {e}")
+                await session.rollback()
 
 async def process_episodes_symlink():
     """JOB: Symlink Files (Very Fast)"""
     async with async_session() as session:
         # Huge batch size for local operations
-        pending = await episode_processor.get_episodes_to_symlink(session, limit=100)
-        # Don't log if empty to avoid spamming logs every 5s
-        if pending:
-            logger.info(f"🔗 Symlinking {len(pending)} episodes...")
+        try:
+            pending = await episode_processor.get_episodes_to_symlink(session, limit=100)
+            if pending:
+                logger.info(f"🔗 Symlinking {len(pending)} episodes...")
+        except Exception as e:
+            logger.error(f"Error fetching symlink items: {e}")
+            return
         
         for episode, show in pending:
             try:
                 await episode_processor.process_episode(episode, show, session)
-                # No sleep needed, file operations are local
+            except (StaleDataError, ObjectDeletedError):
+                logger.warning(f"Item vanished during symlink (concurrent delete?): {show.title}")
+                await session.rollback()
             except Exception as e:
                 logger.error(f"Symlink error: {e}")
+                await session.rollback()
 
 async def sync_plex_watchlist():
     """JOB: Sync Plex Watchlist to DB"""
