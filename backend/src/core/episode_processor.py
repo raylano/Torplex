@@ -170,9 +170,11 @@ class EpisodeProcessor:
             await session.rollback()
             
             try:
-                # Try to mark as FAILED in a clean transaction
-                episode.state = MediaState.FAILED
-                await session.commit()
+                # Re-fetch episode in clean transaction to avoid detached object issues
+                episode = await session.get(Episode, episode.id)
+                if episode:
+                    episode.state = MediaState.FAILED
+                    await session.commit()
             except Exception as db_err:
                 # If even that fails, just rollback and give up
                 logger.error(f"Failed to save error state: {db_err}")
