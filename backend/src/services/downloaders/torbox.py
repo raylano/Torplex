@@ -55,7 +55,7 @@ class TorboxService:
             if response.status_code == 401:
                 logger.error("Torbox: Invalid API key")
                 return None
-            
+                
             response.raise_for_status()
             
             result = response.json()
@@ -66,14 +66,19 @@ class TorboxService:
             else:
                 error = result.get("error", result.get("detail", "Unknown error"))
                 logger.error(f"Torbox API error: {error}")
+                # Raise exception for retryable errors if needed, but usually logic errors return None
                 return None
             
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"Torbox rate limit (429). Retrying...")
+                raise e # Raise to let @retry handle it
+                
             logger.error(f"Torbox API error: {e.response.status_code} - {e.response.text}")
             return None
         except Exception as e:
             logger.error(f"Torbox request failed: {e}")
-            return None
+            raise e # Raise other connection errors for retry
     
     async def get_user_info(self) -> Optional[Dict]:
         """Get user account info"""
