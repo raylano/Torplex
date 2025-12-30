@@ -58,8 +58,12 @@ class DownloaderOrchestrator:
         # This is because RD's instant availability endpoint is disabled
         # We mark them as potentially cached and verify during selection
         if self.real_debrid.is_configured:
-            # Don't pre-check RD - we'll verify during torrent selection
-            logger.debug(f"Skipping RD cache pre-check for {len(info_hashes)} hashes (will verify during selection)")
+            # OPTIMISTIC: Mark all hashes as available on Real-Debrid.
+            # Rationale: User prefers RD (unlimited slots) over Torbox (limit 10).
+            # Even if not cached, we want to try RD first.
+            for h in info_hashes:
+                results[h.lower()].append("real_debrid")
+            logger.debug(f"Marked {len(info_hashes)} hashes as potentially available on Real-Debrid")
         
         # Log summary
         cached_on_torbox = sum(1 for v in results.values() if "torbox" in v)
