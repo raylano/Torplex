@@ -534,7 +534,9 @@ async def retry_episode(
     if not episode:
         raise HTTPException(status_code=404, detail="Episode not found")
     
+    # Reset state AND absolute number to force re-evaluation
     episode.state = MediaState.REQUESTED
+    episode.absolute_episode_number = None  # Force re-fetch of absolute number
     await db.commit()
     
     return {
@@ -573,6 +575,7 @@ async def retry_all_episodes(
     count = 0
     for ep in episodes:
         ep.state = MediaState.REQUESTED
+        ep.absolute_episode_number = None  # Force re-fetch of absolute number
         count += 1
     
     await db.commit()
