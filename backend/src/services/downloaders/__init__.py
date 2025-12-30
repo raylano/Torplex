@@ -141,7 +141,8 @@ class DownloaderOrchestrator:
         info_hash: Optional[str],
         preferred_provider: Optional[str] = None,
         download_url: Optional[str] = None,
-        is_usenet: bool = False
+        is_usenet: bool = False,
+        name: Optional[str] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         Add media (torrent or usenet) to a debrid service.
@@ -203,9 +204,9 @@ class DownloaderOrchestrator:
                 elif provider_name == "torbox":
                     result = None
                     if is_usenet and download_url:
-                        result = await self.torbox.add_usenet(download_url)
+                        result = await self.torbox.add_usenet(download_url, name=name)
                     elif info_hash:
-                        result = await self.torbox.add_magnet(info_hash)
+                        result = await self.torbox.add_magnet(info_hash, name=name)
                     
                     if result:
                         type_label = "Usenet" if is_usenet else "Torrent"

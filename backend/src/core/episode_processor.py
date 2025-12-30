@@ -369,10 +369,15 @@ class EpisodeProcessor:
                 return MediaState.DOWNLOADED
         
         # Add to debrid (Torbox or standard RD add)
+        # Add to debrid (Torbox or standard RD add)
+        # Construct a meaningful name for Torbox/Usenet uploads
+        download_name = f"{show.title} S{episode.season_number:02d}E{episode.episode_number:02d}"
+        
         provider, debrid_id = await downloader.add_torrent(
             info_hash, 
             download_url=download_url,
-            is_usenet=is_usenet
+            is_usenet=is_usenet,
+            name=download_name
         )
         
         if provider and debrid_id:

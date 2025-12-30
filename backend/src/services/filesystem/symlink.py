@@ -358,6 +358,14 @@ class SymlinkService:
                         continue
                     if video_file.suffix.lower() not in video_exts:
                         continue
+                        
+                    # EXPLICIT EXCLUSION: Skip "Movie" files when looking for regular episodes
+                    # We are in find_episode_in_torrent, strictly looking for Show Episodes.
+                    # Ignore "Movie" files even if torrent name implies it's a pack.
+                    if "movie" in video_file.name.lower():
+                        logger.debug(f"Skipping potential movie file: {video_file.name}")
+                        continue
+                        
                     found_files.append(video_file)
             except Exception as e:
                 logger.error(f"Error listing files in {path}: {e}")
@@ -366,7 +374,10 @@ class SymlinkService:
             logger.warning(f"No video files found in torrent folders for {torrent_name}")
             return None
             
-        logger.info(f"Found {len(found_files)} potential video files: {[f.name for f in found_files]}")
+        # Sort files by size (largest first) to prefer higher quality/main files over samples or low-res duplicates
+        found_files.sort(key=lambda x: x.stat().st_size, reverse=True)
+            
+        logger.info(f"Found {len(found_files)} potential video files (sorted by size): {[f.name for f in found_files[:10]]}...")
 
         # Check for matches
         for file in found_files:

@@ -219,6 +219,13 @@ class TorboxService:
             if "Content-Type" in upload_headers:
                 del upload_headers["Content-Type"]
             
+            # Use provided name for filename if available to prevent "download" appearing in Torbox
+            if name:
+                safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+                if not safe_name.lower().endswith(".nzb"):
+                     safe_name += ".nzb"
+                filename = safe_name
+            
             logger.info(f"Uploading NZB to Torbox: filename='{filename}', size={len(file_content)} bytes")
             
             # Ensure name is passed if available
