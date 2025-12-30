@@ -95,6 +95,13 @@ def _deduplicate(results: List[TorrentResult]) -> List[TorrentResult]:
     seen = set()
     unique = []
     for r in results:
+        # Handle items without info_hash (e.g. Usenet)
+        if not r.info_hash:
+            # We can't deduplicate by hash, so we check download_url or just keep it
+            # For now, let's just keep them (safer than dropping)
+            unique.append(r)
+            continue
+            
         if r.info_hash.lower() not in seen:
             seen.add(r.info_hash.lower())
             unique.append(r)
