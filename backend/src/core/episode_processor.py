@@ -430,6 +430,18 @@ class EpisodeProcessor:
     
     async def get_pending_episodes(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
         """Get episodes that need processing, with their parent show"""
+        # Custom sort order to prioritize finishing items deep in the pipeline
+        # Priority: SYMLINKED > DOWNLOADED > SCRAPED > REQUESTED
+        from sqlalchemy import case
+        
+        priority_order = case(
+            (Episode.state == MediaState.SYMLINKED, 4),
+            (Episode.state == MediaState.DOWNLOADED, 3),
+            (Episode.state == MediaState.SCRAPED, 2),
+            (Episode.state == MediaState.REQUESTED, 1),
+            else_=0
+        )
+        
         result = await session.execute(
             select(Episode, MediaItem)
             .join(MediaItem, Episode.show_id == MediaItem.id)
@@ -439,6 +451,7 @@ class EpisodeProcessor:
                 MediaState.DOWNLOADED,
                 MediaState.SYMLINKED,
             ]))
+            .order_by(priority_order.desc(), Episode.season_number, Episode.episode_number)
             .limit(limit)
         )
         return result.all()
