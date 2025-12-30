@@ -308,15 +308,23 @@ class SymlinkService:
             if path.is_file():
                 if path.suffix.lower() in video_exts:
                     logger.info(f"Found single-file torrent: {path.name}")
-                    # Check if this file matches the episode pattern
+                    # CRITICAL FIX for ANIME:
+                    # If we scraped using absolute numbering (e.g. 1155) for S09E320, 
+                    # the file will look like "One Piece - 1155.mkv".
+                    # But our `patterns` are looking for S09E320.
+                    # We need to be flexible: if it's a single file and we found it by exact name match 
+                    # from the scraping result, we should TRUST it.
+                    
+                    # Try patterns first (safest)
                     filename_lower = path.name.lower()
                     for pattern in patterns:
                         if re.search(pattern, filename_lower, re.IGNORECASE):
-                            logger.info(f"Single-file match: {path.name}")
+                            logger.info(f"Single-file match (pattern): {path.name}")
                             return path
-                    # Even if pattern doesn't match exactly, the torrent was selected for this episode
-                    # so return it (the scraper already determined this is the right file)
-                    logger.info(f"Returning single-file torrent (trusted): {path.name}")
+                    
+                    # If patterns fail, check if the file contains the absolute episode number?
+                    # Or just trust it because `path` comes from `torrent_name` which was selected by scraper.
+                    logger.info(f"Single-file match (trusted source): {path.name}")
                     return path
                 continue
             

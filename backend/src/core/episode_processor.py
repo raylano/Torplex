@@ -469,33 +469,45 @@ class EpisodeProcessor:
         await session.commit()
         return MediaState.FAILED
     
-    async def get_pending_episodes(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
-        """Get episodes that need processing, with their parent show"""
-        # Custom sort order to prioritize finishing items deep in the pipeline
-        # Priority: SYMLINKED > DOWNLOADED > SCRAPED > REQUESTED
-        from sqlalchemy import case
-        
-        priority_order = case(
-            (Episode.state == MediaState.SYMLINKED, 4),
-            (Episode.state == MediaState.DOWNLOADED, 3),
-            (Episode.state == MediaState.SCRAPED, 2),
-            (Episode.state == MediaState.REQUESTED, 1),
-            else_=0
-        )
-        
+    async def get_episodes_to_scrape(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
+        """Get episodes that need scraping (REQUESTED state)"""
+        # Prioritize lower seasons/episodes
         result = await session.execute(
             select(Episode, MediaItem)
             .join(MediaItem, Episode.show_id == MediaItem.id)
-            .where(Episode.state.in_([
-                MediaState.REQUESTED,
-                MediaState.SCRAPED,
-                MediaState.DOWNLOADED,
-                MediaState.SYMLINKED,
-            ]))
-            .order_by(priority_order.desc(), Episode.season_number, Episode.episode_number)
+            .where(Episode.state == MediaState.REQUESTED)
+            .order_by(Episode.season_number, Episode.episode_number)
             .limit(limit)
         )
         return result.all()
+
+    async def get_episodes_to_download(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
+        """Get episodes that need downloading (SCRAPED state)"""
+        result = await session.execute(
+            select(Episode, MediaItem)
+            .join(MediaItem, Episode.show_id == MediaItem.id)
+            .where(Episode.state == MediaState.SCRAPED)
+            # Prioritize items that have been scraped longest? Or just standard order.
+            .order_by(Episode.updated_at)
+            .limit(limit)
+        )
+        return result.all()
+
+    async def get_episodes_to_symlink(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
+        """Get episodes that need symlinking (DOWNLOADED state)"""
+        result = await session.execute(
+            select(Episode, MediaItem)
+            .join(MediaItem, Episode.show_id == MediaItem.id)
+            .where(Episode.state == MediaState.DOWNLOADED)
+            .order_by(Episode.updated_at)
+            .limit(limit)
+        )
+        return result.all()
+    
+    # Deprecated but kept for compatibility/backup if needed
+    async def get_pending_episodes(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
+        """Deprecated: Use specialized getters instead"""
+        return []
 
 
 # Singleton instance

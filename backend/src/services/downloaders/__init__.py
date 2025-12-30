@@ -177,9 +177,27 @@ class DownloaderOrchestrator:
                     # Add magnet
                     torrent_id = await self.real_debrid.add_magnet(info_hash)
                     if torrent_id:
-                        # Select all files so download starts automatically
-                        await self.real_debrid.select_files(torrent_id, "all")
-                        logger.info(f"Added torrent {info_hash[:8]}... to {provider_name} (files selected)")
+                        # Wait for torrent to be ready for file selection
+                        # RD sometimes takes a moment to process metadata
+                        max_retries = 5
+                        for _ in range(max_retries):
+                            info = await self.real_debrid.get_torrent_info(torrent_id)
+                            if info and info.get("status") == "waiting_files_selection":
+                                # Select all files so download starts automatically
+                                await self.real_debrid.select_files(torrent_id, "all")
+                                logger.info(f"Added torrent {info_hash[:8]}... to {provider_name} (files selected)")
+                                return provider_name, str(torrent_id)
+                            
+                            # If already downloading/downloaded (rare but possible for cached)
+                            if info and info.get("status") in ["downloading", "downloaded"]:
+                                logger.info(f"Added torrent {info_hash[:8]}... to {provider_name} (auto-started)")
+                                return provider_name, str(torrent_id)
+                                
+                            await asyncio.sleep(1)
+                        
+                        # If we timed out or status is wrong, just return ID and hope for best?
+                        # Or log warning.
+                        logger.warning(f"Torrent {torrent_id} not ready for file selection after retries. Status: {info.get('status') if info else 'Unknown'}")
                         return provider_name, str(torrent_id)
                         
                 elif provider_name == "torbox":
