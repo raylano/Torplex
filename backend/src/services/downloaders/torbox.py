@@ -113,7 +113,7 @@ class TorboxService:
         
         return cached_status
     
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(stop=stop_after_attempt(10), wait=wait_exponential(multiplier=2, min=10, max=60))
     async def add_magnet(self, info_hash: str, name: Optional[str] = None) -> Optional[int]:
         """
         Add magnet link to Torbox.
@@ -135,7 +135,7 @@ class TorboxService:
         
         return None
     
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=30))
+    @retry(stop=stop_after_attempt(10), wait=wait_exponential(multiplier=2, min=10, max=60))
     async def add_usenet(self, download_url: str, name: Optional[str] = None) -> Optional[int]:
         """
         Add Usenet (NZB) to Torbox via File Upload.

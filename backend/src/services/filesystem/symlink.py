@@ -323,6 +323,17 @@ class SymlinkService:
             # CASE 2: Multi-file torrent - search inside the folder
             logger.info(f"Checking folder: {path}")
             try:
+                # DEBUG: List all files to see what's actually there
+                logger.debug(f"Listing contents of {path}...")
+                all_files_count = 0
+                for item in path.rglob("*"):
+                    if item.is_file():
+                        all_files_count += 1
+                        logger.debug(f" - Found file: {item.name} (size: {item.stat().st_size} bytes)")
+                
+                if all_files_count == 0:
+                    logger.warning(f"Total files found in {path}: 0 (Empty folder?)")
+
                 for video_file in path.rglob("*"):
                     if not video_file.is_file():
                         continue
