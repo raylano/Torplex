@@ -133,29 +133,62 @@ class TorboxService:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def add_usenet(self, download_url: str, name: Optional[str] = None) -> Optional[int]:
         """
-        Add Usenet (NZB) to Torbox via URL.
-        Returns the torrent ID (Torbox uses IDs for both torrent and usenet).
+        Add Usenet (NZB) to Torbox via File Upload.
+        Since Prowlarr URLs are local/internal, we must download the NZB locally
+        and upload the file content to Torbox.
         """
-        # Torbox uses /api/usenet/createusenetdownload to add via link
-        # However, documentation check: /usenet/createusenetdownload expecting 'link'
-        
-        # Note: Torbox unified API often allows adding NZBs via creating torrent endpoint or specific one
-        # Checking Torbox API docs behavior: /usenet/createusenetdownload
-        
-        result = await self._request(
-            "POST",
-            "/usenet/createusenetdownload",
-            data={"link": download_url}
-        )
-        
-        # If successfully added
-        if result and "usenet_id" in result:
-             # Torbox distinguishes IDs, but for our internal tracking we just need an ID
-            logger.info(f"Torbox: Added Usenet download -> ID: {result['usenet_id']}")
-            return result["usenet_id"]
-        
-        # Fallback/Check: Some versions/wrappers might use different endpoints
-        return None
+        try:
+            # 1. Download NZB content locally
+            logger.debug(f"Downloading NZB from Prowlarr: {download_url}")
+            # Use a separate client for the download to avoid base_url issues + untrusted certs
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as dl_client:
+                nzb_resp = await dl_client.get(download_url, follow_redirects=True)
+                nzb_resp.raise_for_status()
+                
+                # Determine filename
+                import cgi
+                filename = "download.nzb"
+                if "content-disposition" in nzb_resp.headers:
+                    _, params = cgi.parse_header(nzb_resp.headers["content-disposition"])
+                    if "filename" in params:
+                        filename = params["filename"]
+                
+                if not filename.endswith(".nzb"):
+                    filename += ".nzb"
+                    
+                file_content = nzb_resp.content
+
+            # 2. Upload file to Torbox
+            # Use lower-level client.request to handle multipart properly if needed,
+            # but httpx handles 'files' arg nicely.
+            
+            # Note: We need to use the headers property but EXCLUDE Content-Type 
+            # so httpx can set the boundary for multipart/form-data.
+            # However, self.headers only sets Authorization, which is fine to keep.
+            
+            url = f"{self.BASE_URL}/usenet/createusenetdownload"
+            
+            response = await self.client.post(
+                url,
+                headers=self.headers,
+                files={"file": (filename, file_content, "application/x-nzb")}
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+             
+            if result.get("success") and result.get("data", {}).get("usenet_id"):
+                usenet_id = result["data"]["usenet_id"]
+                logger.info(f"Torbox: Uploaded NZB -> ID: {usenet_id}")
+                return usenet_id
+            
+            error = result.get("error", result.get("detail", "Unknown error"))
+            logger.error(f"Torbox NZB upload failed: {error}")
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to process NZB add: {e}")
+            return None
     
     async def get_torrent_info(self, torrent_id: int) -> Optional[Dict]:
         """Get torrent info including files"""
