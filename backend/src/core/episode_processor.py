@@ -404,6 +404,22 @@ class EpisodeProcessor:
                 source_path = direct_path
                 logger.debug(f"Using direct file path from mount scan: {direct_path.name}")
         
+        # LAZY LOAD ABSOLUTE NUMBER:
+        # If absolute number is missing (e.g. download happened before fix, or scrape missed it),
+        # try to fetch it now. Critical for Anime Usenet symlinking.
+        if not episode.absolute_episode_number and show.tmdb_id:
+             try:
+                from src.services.content.tmdb import tmdb_service
+                abs_map = await tmdb_service.get_show_absolute_map(show.tmdb_id)
+                if abs_map:
+                    key = (episode.season_number, episode.episode_number)
+                    if key in abs_map:
+                        episode.absolute_episode_number = abs_map[key]
+                        await session.commit()
+                        logger.info(f"Lazily set Absolute Number {episode.absolute_episode_number} for {show.title} S{episode.season_number}E{episode.episode_number}")
+             except Exception as e:
+                logger.warning(f"Failed to lazy fetch absolute number: {e}")
+        
         # OPTION 2: Use stored torrent_name for path construction
         if not source_path and episode.torrent_name:
             # Pass absolute_episode_number for Anime matching (e.g. "One Piece - 1100.mkv")
@@ -479,12 +495,13 @@ class EpisodeProcessor:
     
     async def get_episodes_to_scrape(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
         """Get episodes that need scraping (REQUESTED state)"""
-        # Prioritize lower seasons/episodes
+        # Randomize order to prevent one show from blocking the queue
+        from sqlalchemy.sql.expression import func
         result = await session.execute(
             select(Episode, MediaItem)
             .join(MediaItem, Episode.show_id == MediaItem.id)
             .where(Episode.state == MediaState.REQUESTED)
-            .order_by(Episode.season_number, Episode.episode_number)
+            .order_by(func.random()) # Randomize!
             .limit(limit)
         )
         return result.all()

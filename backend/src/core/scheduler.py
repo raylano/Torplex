@@ -287,6 +287,7 @@ def setup_scheduler():
         id="scrape_episodes",
         name="Scrape Episodes",
         replace_existing=True,
+        max_instances=3, # Allow parallel scraping
     )
 
     # 2. Downloader Job (Every 60s)
@@ -296,6 +297,7 @@ def setup_scheduler():
         id="download_episodes",
         name="Download Episodes",
         replace_existing=True,
+        max_instances=3,
     )
 
     # 3. Symlink Job (Every 5s)
@@ -305,6 +307,7 @@ def setup_scheduler():
         id="symlink_episodes",
         name="Symlink Episodes",
         replace_existing=True,
+        max_instances=5, # Allow overlapping symlink runs
     )
     
     # Sync Plex Watchlist every 5 minutes
