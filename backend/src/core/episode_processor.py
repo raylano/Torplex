@@ -421,7 +421,8 @@ class EpisodeProcessor:
                 show.title,
                 episode.season_number,
                 episode.episode_number,
-                alternative_titles=None # Could fetch these if needed
+                alternative_titles=None, # Could fetch these if needed
+                absolute_episode_number=episode.absolute_episode_number
             )
             
              if source_path:

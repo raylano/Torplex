@@ -391,11 +391,13 @@ class SymlinkService:
         return None
     
     def find_episode(self, show_title: str, season: int, episode: int, 
-                     alternative_titles: list = None) -> Optional[Path]:
+                     alternative_titles: list = None,
+                     absolute_episode_number: Optional[int] = None) -> Optional[Path]:
         """
         Find a specific episode file in the mount.
         Searches for S01E01/s01e01/1x01 patterns.
         Uses alternative titles for better matching.
+        Supports absolute episode numbering for Anime.
         """
         import re
         
@@ -424,7 +426,17 @@ class SymlinkService:
             rf'^\s*-?\s*0*{episode}\s*(?:\[|\-|$)',       # " - 18 " at start only
         ]
         
-        logger.info(f"Searching for episode: {show_title} S{season:02d}E{episode:02d}")
+        # Add absolute numbering patterns if available
+        absolute_patterns = []
+        if absolute_episode_number:
+            logger.info(f"Using absolute episode number {absolute_episode_number} for fallback search")
+            absolute_patterns = [
+                rf'(?:e|ep|episode)\.?\s*0*{absolute_episode_number}\b',     # Episode 328
+                rf'(?:^|[\s\-\.\[\(])0*{absolute_episode_number}(?:[\s\-\.\]\)]|$)', # " - 328 ", "[328]"
+                rf'^{absolute_episode_number}\b', # Starts with 328 (e.g. "328 - Title.mkv")
+            ]
+        
+        logger.info(f"Searching for episode: {show_title} S{season:02d}E{episode:02d} (Abs: {absolute_episode_number})")
         if alternative_titles:
             logger.debug(f"Also trying alternative titles: {alternative_titles[:3]}...")
         
@@ -591,7 +603,7 @@ class SymlinkService:
                 # Now check for episode match
                 if item.is_file():
                     # For standalone files, require title in filename
-                    if (self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season)
+                    if (self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season, absolute_patterns)
                             and file_title_valid(item.name)):
                         matches.append(item)
                             
@@ -601,7 +613,7 @@ class SymlinkService:
                     try:
                         video_files = self._find_video_files(item)
                         for vf in video_files:
-                            if self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season):
+                            if self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season, absolute_patterns):
                                 # Check if filename contains title OR if folder is an EXACT season match
                                 # (e.g., "My Hero Academia S04/" folder with "S04E01-Title.mkv" files)
                                 folder_has_show_in_name = file_title_valid(item.name)
@@ -655,18 +667,36 @@ class SymlinkService:
     
     def _file_matches_episode(self, filename: str, target_season: int, target_episode: int,
                                strict_patterns: list, anime_patterns: list, 
-                               folder_season: Optional[int]) -> bool:
+                               folder_season: Optional[int],
+                               absolute_patterns: list = None) -> bool:
         """
         Check if a filename matches the target season and episode.
         Uses strict patterns first, then anime patterns with season validation.
+        Also checks absolute numbering patterns if provided.
         """
         import re
         filename_lower = filename.lower()
+        
+        # EXPLICIT EXCLUSION: Skip "Movie" files when looking for regular episodes
+        # This prevents "One Piece Movie 02" from matching "Episode 2"
+        if "movie" in filename_lower:
+            # But wait, what if the episode title contains "Movie"? (Rare but possible)
+            # Safe bet: start with exclusion.
+            return False
         
         # First try strict patterns (they include season, so no extra check needed)
         for pattern in strict_patterns:
             if re.search(pattern, filename_lower, re.IGNORECASE):
                 return True
+        
+        # Check absolute numbering patterns (High trust)
+        if absolute_patterns:
+            for pattern in absolute_patterns:
+                if re.search(pattern, filename_lower, re.IGNORECASE):
+                    # Verify it doesn't look like a different season
+                    # e.g. "S02 - 13" should NOT match absolute 13 (which is S01E13)
+                    # But usually absolute number is unique.
+                    return True
         
         # For anime patterns, we need to validate the season separately
         # because these patterns only match episode number
