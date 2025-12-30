@@ -432,7 +432,7 @@ class EpisodeProcessor:
         # OPTION 2: Use stored torrent_name for path construction
         if not source_path and episode.torrent_name:
             # Pass absolute_episode_number for Anime matching (e.g. "One Piece - 1100.mkv")
-            source_path = symlink_service.find_episode_in_torrent(
+            source_path = await symlink_service.find_episode_in_torrent(
                 episode.torrent_name,
                 episode.season_number,
                 episode.episode_number,
@@ -442,7 +442,7 @@ class EpisodeProcessor:
         # OPTION 3: General search in mount (fallback for Usenet or unknown torrent names)
         # This is critical for Usenet where we don't know the folder name in advance
         if not source_path and (episode.file_path and episode.file_path.startswith("usenet:")):
-             source_path = symlink_service.find_episode(
+             source_path = await symlink_service.find_episode(
                 show.title,
                 episode.season_number,
                 episode.episode_number,

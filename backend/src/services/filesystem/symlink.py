@@ -167,7 +167,7 @@ class SymlinkService:
         logger.info(f"Found match: {best_folder.name} (score: {best_score})")
         return best_file if best_file else best_folder
     
-    def find_episode_in_torrent(self, torrent_name: str, season: int, episode: int, 
+    async def find_episode_in_torrent(self, torrent_name: str, season: int, episode: int, 
                               absolute_episode_number: Optional[int] = None) -> Optional[Path]:
         """
         Find specific episode file within a known torrent folder.
@@ -403,7 +403,7 @@ class SymlinkService:
         logger.debug(f"Episode S{season:02d}E{episode:02d} not found in {torrent_name}")
         return None
     
-    def find_episode(self, show_title: str, season: int, episode: int, 
+    async def find_episode(self, show_title: str, season: int, episode: int, 
                      alternative_titles: list = None,
                      absolute_episode_number: Optional[int] = None) -> Optional[Path]:
         """
