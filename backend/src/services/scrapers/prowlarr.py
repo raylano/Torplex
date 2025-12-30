@@ -345,19 +345,24 @@ class ProwlarrScraper:
         import re
         title_lower = title.lower()
         
+        # STRIP CRC HASHES (8 hex chars) to prevent partial matching
+        # e.g. [507B5014] contains "507" which matches (?<!\d)507(?!\d)
+        # We replace them with empty string for the check
+        title_clean = re.sub(r'[\[\(][0-9a-fA-F]{8}[\]\)]', '', title_lower)
+        
         # 1. Absolute Number Check (Highest Priority)
         # MUST match the number as a whole word (e.g. "109" matches "109" but NOT "1097")
         if absolute_number:
             # Check for "109" bounded by non-digits
-            if re.search(rf'(?<!\d){absolute_number}(?!\d)', title_lower):
+            if re.search(rf'(?<!\d){absolute_number}(?!\d)', title_clean):
                  return True
         
         # 2. Standard SxxExx Check
         # Must match S4E109, 4x109, etc.
         # Strict checking:
-        if re.search(rf's0*{season}\s*e0*{episode}(?!\d)', title_lower):
+        if re.search(rf's0*{season}\s*e0*{episode}(?!\d)', title_clean):
             return True
-        if re.search(rf'\b{season}x{episode:02d}\b', title_lower):
+        if re.search(rf'\b{season}x{episode:02d}\b', title_clean):
             return True
             
         # 3. Special Case: Anime Cour 2 (e.g. "Title 13" for S01E13)

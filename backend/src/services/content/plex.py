@@ -164,5 +164,61 @@ class PlexWatchlistService:
         await self.client.aclose()
 
 
+    async def sync_watchlist(self, session):
+        """Sync Plex Watchlist items to local database"""
+        if not self.token:
+            return
+            
+        try:
+            from sqlalchemy import select
+            from src.models import MediaItem, MediaState, MediaType
+            
+            items = await self.get_watchlist()
+            if not items:
+                return
+
+            logger.info(f"Syncing {len(items)} items from Plex Watchlist")
+            
+            for item in items:
+                # Extract rating key (Plex ID)
+                rating_key = item.get("ratingKey")
+                if not rating_key:
+                    continue
+                    
+                # Check if exists
+                stmt = select(MediaItem).where(MediaItem.plex_id == rating_key)
+                result = await session.execute(stmt)
+                existing = result.scalar_one_or_none()
+                
+                if existing:
+                    continue
+                    
+                # Create new item
+                ids = self.extract_ids(item)
+                media_type = MediaType.MOVIE if item.get("type") == "movie" else MediaType.SHOW
+                
+                # Check absolute numbering for Anime
+                # Simple heuristic: if it has "Anime" genre or similar, mark as ANIME_SHOW
+                # For now default to SHOW/MOVIE
+                
+                new_item = MediaItem(
+                    title=item.get("title"),
+                    year=int(item.get("year")) if item.get("year") else None,
+                    type=media_type,
+                    state=MediaState.REQUESTED,
+                    plex_id=rating_key,
+                    imdb_id=ids.get("imdb_id"),
+                    tmdb_id=ids.get("tmdb_id"),
+                    tvdb_id=ids.get("tvdb_id"),
+                )
+                session.add(new_item)
+                logger.info(f"Added from Watchlist: {new_item.title}")
+            
+            await session.commit()
+            
+        except Exception as e:
+            logger.error(f"Error syncing Plex watchlist: {e}")
+            await session.rollback()
+
 # Singleton instance
 plex_service = PlexWatchlistService()
