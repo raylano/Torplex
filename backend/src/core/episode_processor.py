@@ -90,7 +90,8 @@ class EpisodeProcessor:
                 if show.is_anime:
                     import re
                     # Simple regex for dubbed/dual audio indicators
-                    if re.search(r'(dub|dual|multi|english)', existing_file.name, re.IGNORECASE):
+                    # Added 'eng' to catch "ENG JAP" releases, using boundaries to avoid partial matches
+                    if re.search(r'\b(dub|dual|multi|english|eng)\b', existing_file.name, re.IGNORECASE):
                         is_dubbed_file = True
                     
                     if not is_dubbed_file:
