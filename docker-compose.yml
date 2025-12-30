@@ -61,43 +61,26 @@ services:
       - /mnt/torplex:/data:rshared
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro
-    command: >
-      mount zurg: /data
-      --allow-other
-      --allow-non-empty
-      --vfs-cache-mode full
-      --vfs-cache-max-size 50G
-      --vfs-read-ahead 128M
-      --dir-cache-time 1000h
-      --buffer-size 32M
-      --log-level INFO
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting 60 seconds for Zurg to initialize..."
+        sleep 60
+        echo "Starting rclone mount..."
+        rclone mount zurg: /data \
+          --allow-other \
+          --allow-non-empty \
+          --vfs-cache-mode full \
+          --vfs-cache-max-size 50G \
+          --vfs-read-ahead 128M \
+          --dir-cache-time 1000h \
+          --buffer-size 32M \
+          --log-level INFO
     depends_on:
-      - zurg  # Just wait for start, health check not needed
+      - zurg
     networks:
       - torplex_net
 
-  # ============================================================================
-  # ZILEAN - DMM Cache Checker
-  # ============================================================================
-  zilean:
-    image: ipromknight/zilean:latest
-    container_name: torplex_zilean
-    restart: unless-stopped
-    ports:
-      - "8181:8181"
-    environment:
-      - Zilean__Database__ConnectionString=Host=torplex_db;Database=zilean;Username=torplex;Password=${DB_PASSWORD}
-      - Zilean__Torrents__EnableScraping=true
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8181/healthchecks/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - torplex_net
 
   # ============================================================================
   # BACKEND - FastAPI Application
@@ -115,12 +98,11 @@ services:
       - PLEX_URL=${PLEX_URL}
       - PROWLARR_URL=${PROWLARR_URL}
       - PROWLARR_API_KEY=${PROWLARR_API_KEY}
-      - ZILEAN_URL=http://zilean:8181
       - MOUNT_PATH=/mnt/zurg
       - SYMLINK_PATH=/mnt/media
       - TZ=${TZ:-Europe/Amsterdam}
     volumes:
-      - /mnt/torplex:/mnt/zurg:rslave
+      - /mnt/combined:/mnt/zurg:rslave
       - ./data/media:/mnt/media
     ports:
       - "8000:8000"
@@ -129,8 +111,6 @@ services:
         condition: service_healthy
       rclone:
         condition: service_started
-      zilean:
-        condition: service_healthy
     networks:
       - torplex_net
 
@@ -199,7 +179,7 @@ services:
     volumes:
       - ./config/plex:/config
       - ./data/media:/data/media:rslave
-      - /mnt/torplex:/mnt/zurg:rslave  # Required for symlink resolution
+      - /mnt/combined:/mnt/zurg:rslave  # Required for symlink resolution
 
 networks:
   torplex_net:

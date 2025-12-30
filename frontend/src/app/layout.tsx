@@ -20,7 +20,8 @@ export default function RootLayout({
             <body className={inter.className}>
                 <div className="flex min-h-screen">
                     <Sidebar />
-                    <main className="flex-1 ml-64 p-8">
+                    {/* ml-0 on mobile, ml-64 on desktop (md+) */}
+                    <main className="flex-1 ml-0 md:ml-64 p-4 md:p-8 pt-16 md:pt-8">
                         {children}
                     </main>
                 </div>
@@ -28,3 +29,4 @@ export default function RootLayout({
         </html>
     )
 }
+

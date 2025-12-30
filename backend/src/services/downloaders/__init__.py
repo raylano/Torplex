@@ -9,20 +9,18 @@ import asyncio
 from src.services.downloaders.realdebrid import real_debrid_service, RealDebridService
 from src.services.downloaders.torbox import torbox_service, TorboxService
 from src.services.scrapers.torrentio import TorrentResult
-from src.services.scrapers.zilean import zilean_service
 
 
 class DownloaderOrchestrator:
     """
     Orchestrates multiple debrid services.
     Priority: Real-Debrid -> Torbox
-    Uses Zilean for cache checking (more reliable than RD's disabled endpoint)
+    Uses direct add-and-check for Real-Debrid (instant availability endpoint is disabled).
     """
     
     def __init__(self):
         self.real_debrid = real_debrid_service
         self.torbox = torbox_service
-        self.zilean = zilean_service
     
     @property
     def available_providers(self) -> List[str]:
@@ -36,8 +34,9 @@ class DownloaderOrchestrator:
     
     async def check_cache_all(self, info_hashes: List[str]) -> Dict[str, List[str]]:
         """
-        Check cache status using Zilean (DMM database) as primary source.
-        Falls back to debrid provider checks if Zilean not configured.
+        Check cache status on available providers.
+        For Real-Debrid: Uses add-and-check method (instant availability endpoint disabled).
+        For Torbox: Uses instant availability endpoint.
         Returns dict mapping info_hash -> list of providers where it's cached
         """
         if not info_hashes:
@@ -45,40 +44,31 @@ class DownloaderOrchestrator:
         
         results: Dict[str, List[str]] = {h.lower(): [] for h in info_hashes}
         
-        # Use Zilean as primary cache checker for Real-Debrid
-        if self.zilean.is_configured and self.real_debrid.is_configured:
-            logger.info(f"Checking {len(info_hashes)} hashes via Zilean...")
-            try:
-                zilean_results = await self.zilean.check_hashes(info_hashes)
-                for info_hash, is_cached in zilean_results.items():
-                    if is_cached:
-                        results[info_hash.lower()].append("real_debrid")
-            except Exception as e:
-                logger.error(f"Zilean cache check failed: {e}")
-        
-        # Check Torbox directly (if configured and has its own instant availability)
+        # Check Torbox instant availability (if configured)
         if self.torbox.is_configured:
             try:
                 torbox_results = await self.torbox.check_instant_availability(info_hashes)
                 for info_hash, is_cached in torbox_results.items():
-                    if is_cached and "torbox" not in results.get(info_hash.lower(), []):
+                    if is_cached:
                         results[info_hash.lower()].append("torbox")
             except Exception as e:
                 logger.error(f"Torbox cache check failed: {e}")
         
-        # If no Zilean configured, try RD directly (likely won't work due to disabled endpoint)
-        if not self.zilean.is_configured and self.real_debrid.is_configured:
-            try:
-                rd_results = await self.real_debrid.check_instant_availability(info_hashes)
-                for info_hash, is_cached in rd_results.items():
-                    if is_cached:
-                        results[info_hash.lower()].append("real_debrid")
-            except Exception as e:
-                logger.debug(f"RD cache check failed (expected): {e}")
+        # For Real-Debrid, we'll check via add-and-check when actually selecting torrents
+        # This is because RD's instant availability endpoint is disabled
+        # We mark them as potentially cached and verify during selection
+        if self.real_debrid.is_configured:
+            # OPTIMISTIC: Mark all hashes as available on Real-Debrid.
+            # Rationale: User prefers RD (unlimited slots) over Torbox (limit 10).
+            # Even if not cached, we want to try RD first.
+            for h in info_hashes:
+                results[h.lower()].append("real_debrid")
+            logger.debug(f"Marked {len(info_hashes)} hashes as potentially available on Real-Debrid")
         
         # Log summary
-        cached_on_any = sum(1 for v in results.values() if v)
-        logger.info(f"Cache check: {cached_on_any}/{len(info_hashes)} cached on at least one provider")
+        cached_on_torbox = sum(1 for v in results.values() if "torbox" in v)
+        if cached_on_torbox > 0:
+            logger.info(f"Cache check: {cached_on_torbox}/{len(info_hashes)} cached on Torbox")
         
         return results
     
@@ -148,35 +138,42 @@ class DownloaderOrchestrator:
     
     async def add_torrent(
         self,
-        info_hash: str,
-        preferred_provider: Optional[str] = None
+        info_hash: Optional[str],
+        preferred_provider: Optional[str] = None,
+        download_url: Optional[str] = None,
+        is_usenet: bool = False
     ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Add torrent to a debrid service.
+        Add media (torrent or usenet) to a debrid service.
         Returns (provider_name, debrid_id) or (None, None) on failure.
         
         Priority:
         1. Preferred provider if specified and configured
-        2. Real-Debrid
-        3. Torbox
+        2. Real-Debrid (Torrents only)
+        3. Torbox (Torrents + Usenet)
         """
         providers_to_try = []
         
-        if preferred_provider:
-            if preferred_provider == "real_debrid" and self.real_debrid.is_configured:
-                providers_to_try.append("real_debrid")
-            elif preferred_provider == "torbox" and self.torbox.is_configured:
-                providers_to_try.append("torbox")
+        # Determine valid providers based on type
+        valid_providers = []
+        if not is_usenet:
+             if self.real_debrid.is_configured: valid_providers.append("real_debrid")
+             if self.torbox.is_configured: valid_providers.append("torbox")
+        else:
+             # Usenet only supported by Torbox currently
+             if self.torbox.is_configured: valid_providers.append("torbox")
         
-        # Add remaining providers as fallback
-        if self.real_debrid.is_configured and "real_debrid" not in providers_to_try:
-            providers_to_try.append("real_debrid")
-        if self.torbox.is_configured and "torbox" not in providers_to_try:
-            providers_to_try.append("torbox")
+        # Build priority list
+        if preferred_provider and preferred_provider in valid_providers:
+            providers_to_try.append(preferred_provider)
+        
+        for p in valid_providers:
+            if p not in providers_to_try:
+                providers_to_try.append(p)
         
         for provider_name in providers_to_try:
             try:
-                if provider_name == "real_debrid":
+                if provider_name == "real_debrid" and not is_usenet and info_hash:
                     # Add magnet
                     torrent_id = await self.real_debrid.add_magnet(info_hash)
                     if torrent_id:
@@ -186,16 +183,23 @@ class DownloaderOrchestrator:
                         return provider_name, str(torrent_id)
                         
                 elif provider_name == "torbox":
-                    result = await self.torbox.add_magnet(info_hash)
+                    result = None
+                    if is_usenet and download_url:
+                        result = await self.torbox.add_usenet(download_url)
+                    elif info_hash:
+                        result = await self.torbox.add_magnet(info_hash)
+                    
                     if result:
-                        logger.info(f"Added torrent {info_hash[:8]}... to {provider_name}")
+                        type_label = "Usenet" if is_usenet else "Torrent"
+                        identifier = download_url[:30] if is_usenet else info_hash[:8]
+                        logger.info(f"Added {type_label} {identifier}... to {provider_name}")
                         return provider_name, str(result)
                         
             except Exception as e:
-                logger.error(f"Failed to add torrent to {provider_name}: {e}")
+                logger.error(f"Failed to add item to {provider_name}: {e}")
                 continue
         
-        logger.error(f"Failed to add torrent {info_hash[:8]}... to any provider")
+        logger.error(f"Failed to add item to any provider")
         return None, None
 
     async def add_usenet(
@@ -244,15 +248,20 @@ class DownloaderOrchestrator:
             return None, None
         
         # Get cache status for all
-        info_hashes = [t.info_hash for t in torrents]
+        info_hashes = [t.info_hash for t in torrents if t.info_hash]
         cache_results = await self.check_cache_all(info_hashes)
         
-        # Filter to only cached torrents
-        cached_torrents = [
-            (t, cache_results.get(t.info_hash.lower(), []))
-            for t in torrents
-            if cache_results.get(t.info_hash.lower())
-        ]
+        # Filter to only cached torrents OR Usenet items (assumed available)
+        cached_torrents = []
+        for t in torrents:
+            # Usenet is always considered "cached"/available
+            if t.is_usenet:
+                cached_torrents.append((t, ["torbox"]))
+                continue
+            
+            # Check torrent cache
+            if t.info_hash and cache_results.get(t.info_hash.lower()):
+                 cached_torrents.append((t, cache_results.get(t.info_hash.lower(), [])))
         
         if not cached_torrents:
             return None, None

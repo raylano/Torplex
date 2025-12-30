@@ -10,7 +10,7 @@ concurrent_workers: 8
 check_for_changes_every_secs: 15
 
 # Naming Options
-retain_rd_torrent_name: false
+retain_rd_torrent_name: true
 retain_folder_name_extension: false
 ignore_renames: true
 

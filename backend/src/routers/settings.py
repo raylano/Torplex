@@ -118,3 +118,35 @@ async def get_provider_status():
         ))
     
     return {"providers": [p.model_dump() for p in providers]}
+
+
+@router.post("/settings/sync-watchlist")
+async def sync_watchlist():
+    """Force sync Plex watchlist immediately"""
+    from src.core.scheduler import sync_plex_watchlist
+    from src.services.content import plex_service
+    
+    if not plex_service.token:
+        return {"error": "Plex not configured", "success": False}
+    
+    # Run sync
+    await sync_plex_watchlist()
+    
+    return {"message": "Watchlist sync completed", "success": True}
+
+
+@router.post("/settings/cleanup-torrents")
+async def cleanup_torrents():
+    """Force cleanup of stale torrents (0% > 24h)"""
+    from src.services.downloaders import real_debrid_service
+    
+    if not real_debrid_service.is_configured:
+        return {"error": "Real-Debrid not configured", "success": False}
+    
+    deleted = await real_debrid_service.cleanup_stale_torrents(max_age_hours=24)
+    
+    return {
+        "message": f"Cleaned up {deleted} stale torrents",
+        "deleted": deleted,
+        "success": True
+    }

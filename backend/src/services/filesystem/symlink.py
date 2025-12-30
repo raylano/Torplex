@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Optional, Tuple
 from loguru import logger
 
+try:
+    import PTN
+except ImportError:
+    PTN = None
+    logger.warning("PTN not installed, falling back to regex matching")
+
 from src.config import settings
 from src.models import MediaItem, MediaType
 
@@ -172,9 +178,11 @@ class SymlinkService:
             return None
         
         # Patterns to match episode numbers
+        # IMPORTANT: Prevent matching S03E01E02 as S03E02 using negative lookbehind
         patterns = [
-            rf's0?{season}e0?{episode}\b',       # S1E1, S01E01, S1E01, etc
-            rf'{season}x0?{episode}\b',          # 1x01
+            rf'(?<![eE]\d)(?<![eE]\d\d)s0*{season}e0*{episode}(?![\d])',  # S1E1, S01E01, but NOT S03E01E02
+            rf'(?<![xX]\d)(?<![xX]\d\d){season}x0*{episode}(?![\d])',      # 1x01
+            rf's0*{season}\s*-\s*0*{episode}(?![\d])',  # S3 - 04 format (common in anime releases)
             # Anime specific patterns (when we are inside the torrent, we can be looser)
             rf'(?:e|ep|episode)\.?\s*0*{episode}\b', # Episode 001
             rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone number: " 001 ", " 01 "
@@ -188,8 +196,110 @@ class SymlinkService:
         # Search in standard mount locations
         search_locations = ["__all__", "shows", "anime"]
         
+        # Normalize torrent name for fuzzy matching
+        def normalize(name: str) -> str:
+            """Normalize name for matching - lowercase, remove special chars"""
+            import unicodedata
+            # Normalize unicode characters
+            normalized = unicodedata.normalize('NFKD', name.lower())
+            # Keep only alphanumeric and spaces
+            return re.sub(r'[^a-z0-9\s]', '', normalized)
+        
+        torrent_norm = normalize(torrent_name)
+        torrent_words = set(torrent_norm.split())
+        
         for subdir in search_locations:
-            path = self.mount_path / subdir / torrent_name
+            subdir_path = self.mount_path / subdir
+            if not subdir_path.exists():
+                continue
+            
+            # First try: exact match
+            path = subdir_path / torrent_name
+            
+            # Second try: exact match without file extension (common case: torrent_name has .mkv but folder doesn't)
+            if not path.exists():
+                # Strip extension and try again
+                torrent_base = torrent_name.rsplit('.', 1)[0] if '.' in torrent_name else torrent_name
+                path_no_ext = subdir_path / torrent_base
+                if path_no_ext.exists():
+                    logger.debug(f"Found folder without extension: {path_no_ext.name}")
+                    path = path_no_ext
+            
+            # Third try: fuzzy match if exact path doesn't exist
+            if not path.exists():
+                # Extract episode number from torrent_name for strict validation
+                # This prevents matching "S3 - 04" when looking for "S3 - 06"
+                episode_in_torrent = None
+                ep_match = re.search(rf's0*{season}\s*[-_.\s]*\s*(?:e)?0*(\d+)', torrent_name.lower())
+                if ep_match:
+                    episode_in_torrent = int(ep_match.group(1))
+                else:
+                    # Try absolute episode number pattern for anime
+                    ep_match = re.search(rf'-\s*0*(\d+)(?:\s|$|\.)', torrent_name)
+                    if ep_match:
+                        episode_in_torrent = int(ep_match.group(1))
+                
+                # Search for folders that match
+                best_match = None
+                best_score = 0
+                
+                try:
+                    for item in subdir_path.iterdir():
+                        if not item.is_dir():
+                            continue
+                        
+                        item_norm = normalize(item.name)
+                        item_words = set(item_norm.split())
+                        
+                        # CRITICAL: If we know the episode number, the folder SHOULD contain it,
+                        # UNLESS it is a Season Pack folder (e.g. "Season 01")
+                        if episode_in_torrent is not None:
+                            # Check if folder contains this exact episode number
+                            folder_ep = None
+                            folder_ep_match = re.search(rf's0*{season}\s*[-_.\s]*\s*(?:e)?0*(\d+)', item.name.lower())
+                            if folder_ep_match:
+                                folder_ep = int(folder_ep_match.group(1))
+                            else:
+                                # Try absolute episode number for anime folders
+                                folder_ep_match = re.search(rf'-\s*0*(\d+)(?:\s|$)', item.name)
+                                if folder_ep_match:
+                                    folder_ep = int(folder_ep_match.group(1))
+                            
+                            # If folder has episode number, it MUST match
+                            if folder_ep is not None and folder_ep != episode_in_torrent:
+                                continue
+                                
+                            # If folder has NO episode number, check if it's a Season Pack folder
+                            # (matches "Season X", "Complete", "Batch", or just "Show Name S01")
+                            if folder_ep is None:
+                                is_season_pack = False
+                                if re.search(rf'season\s*0*{season}', item.name.lower()):
+                                    is_season_pack = True
+                                elif re.search(rf's0*{season}\b(?!e)', item.name.lower()):
+                                    is_season_pack = True
+                                elif 'complete' in item.name.lower() or 'batch' in item.name.lower():
+                                    is_season_pack = True
+                                    
+                                if not is_season_pack:
+                                    # If not a season pack and no episode number, it's ambiguous. 
+                                    # But we might still want to check it if word score is high.
+                                    pass
+                        
+                        # Calculate word overlap score
+                        if torrent_words and item_words:
+                            common = len(torrent_words & item_words)
+                            score = common / max(len(torrent_words), len(item_words))
+                            
+                            # Require at least 50% word match
+                            if score > 0.5 and score > best_score:
+                                best_match = item
+                                best_score = score
+                except Exception as e:
+                    logger.debug(f"Error scanning {subdir_path}: {e}")
+                
+                if best_match:
+                    logger.debug(f"Fuzzy matched '{torrent_name}' to '{best_match.name}' (score: {best_score:.2f})")
+                    path = best_match
             
             if not path.exists():
                 continue
@@ -213,6 +323,17 @@ class SymlinkService:
             # CASE 2: Multi-file torrent - search inside the folder
             logger.info(f"Checking folder: {path}")
             try:
+                # DEBUG: List all files to see what's actually there
+                logger.debug(f"Listing contents of {path}...")
+                all_files_count = 0
+                for item in path.rglob("*"):
+                    if item.is_file():
+                        all_files_count += 1
+                        logger.debug(f" - Found file: {item.name} (size: {item.stat().st_size} bytes)")
+                
+                if all_files_count == 0:
+                    logger.warning(f"Total files found in {path}: 0 (Empty folder?)")
+
                 for video_file in path.rglob("*"):
                     if not video_file.is_file():
                         continue
@@ -255,18 +376,22 @@ class SymlinkService:
         
         # STRICT patterns - must match EXACT season AND episode
         # This prevents S04E18 from matching S02E18 files!
+        # IMPORTANT: Use negative lookbehind (?<!E\d) to prevent matching 
+        # the second episode in double-episode files like S03E01E02
         strict_patterns = [
-            rf's0*{season}e0*{episode}\b',        # S04E18, S4E18, S04E018 etc
-            rf'{season}x{episode:02d}\b',         # 4x18
-            rf'season\s*{season}[^0-9]+episode\s*{episode}\b',  # Season 4 Episode 18
+            rf'(?<![eE]\d)(?<![eE]\d\d)s0*{season}e0*{episode}(?![\d])',   # S03E02 but NOT part of S03E01E02
+            rf'(?<![xX]\d)(?<![xX]\d\d){season}x{episode:02d}(?![\d])',     # 3x02 but not 3x01x02
+            rf'season\s*{season}[^0-9]+episode\s*{episode}\b',  # Season 3 Episode 2
+            rf's0*{season}\s*-\s*0*{episode}(?![\d])',  # S3 - 04 format (common in anime releases)
         ]
         
-        # Fallback patterns for anime (only use if folder clearly matches season)
+        # Fallback patterns for anime (STRICT - only use if folder clearly matches season)
         # These patterns only match episode number, so require extra validation
+        # IMPORTANT: Patterns must NOT match numbers in quality strings like "DDP5 1 Atmos"
         anime_patterns = [
-            rf'(?:e|ep|episode)\.?\s*0*{episode}\b', # Episode 018, Episode 18
-            rf'(?:^|[\s\-\.\[\(])0*{episode}(?:[\s\-\.\]\)]|$)', # Standalone: " 018 ", "[18]"
-            rf' - 0*{episode}(?:\s|\.|$)',        # " - 18 " common in anime
+            rf'(?:e|ep|episode)\.?\s*0*{episode}(?!\d)',  # Episode 018 (requires 'e' prefix)
+            rf'(?:^|\[)\s*0*{episode}(?:\s*\]|\s*-)',     # [018] or [18 - at START only
+            rf'^\s*-?\s*0*{episode}\s*(?:\[|\-|$)',       # " - 18 " at start only
         ]
         
         logger.info(f"Searching for episode: {show_title} S{season:02d}E{episode:02d}")
@@ -282,40 +407,180 @@ class SymlinkService:
             
             for item in search_path.iterdir():
                 item_name_lower = item.name.lower()
-                clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
                 
-                # Check if ANY of our titles matches the folder/file
+                # Use PTN to parse folder/file name and extract title
                 title_match = False
-                for title in titles_to_try:
-                    clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
-                    title_words = [w for w in clean_title.split() if len(w) > 2][:3]
+                extracted_folder_title = None
+                
+                if PTN:
+                    try:
+                        parsed = PTN.parse(item.name)
+                        extracted_folder_title = parsed.get('title', '').lower().strip()
+                    except Exception as e:
+                        logger.debug(f"PTN parse failed for {item.name}: {e}")
+                
+                # Normalize function for comparison
+                def normalize(s):
+                    return re.sub(r'[^a-z0-9\s]', '', s.lower()).strip()
+                
+                if extracted_folder_title:
+                    # PTN extracted a title - use strict comparison
+                    folder_title_norm = normalize(extracted_folder_title)
                     
-                    if title_words:
-                        if all(w in clean_item for w in title_words):
+                    for title in titles_to_try:
+                        title_norm = normalize(title)
+                        
+                        # Exact match
+                        if folder_title_norm == title_norm:
                             title_match = True
+                            logger.debug(f"PTN exact match: '{extracted_folder_title}' == '{title}'")
                             break
-                    else:
-                        if clean_title in clean_item:
+                        
+                        # One contains the other (for abbreviated titles like "MASHLE")
+                        if folder_title_norm in title_norm or title_norm in folder_title_norm:
                             title_match = True
+                            logger.debug(f"PTN substring match: '{extracted_folder_title}' ~ '{title}'")
+                            break
+                        
+                        # Significant word overlap (at least 60% of words)
+                        folder_words = set(folder_title_norm.split())
+                        title_words_set = set(title_norm.split())
+                        
+                        # Remove short words (the, of, a, etc)
+                        folder_words = {w for w in folder_words if len(w) > 2}
+                        title_words_set = {w for w in title_words_set if len(w) > 2}
+                        
+                        if folder_words and title_words_set:
+                            common = folder_words & title_words_set
+                            min_words = min(len(folder_words), len(title_words_set))
+                            
+                            if len(common) >= min_words * 0.6:
+                                title_match = True
+                                logger.debug(f"PTN word overlap match: '{extracted_folder_title}' ~ '{title}' (common: {common})")
+                                break
+                else:
+                    # PTN failed - fallback to strict word matching
+                    clean_item = re.sub(r'[^a-zA-Z0-9\s]', ' ', item_name_lower)
+                    clean_item_words = set(clean_item.split())
+                    
+                    for title in titles_to_try:
+                        clean_title = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
+                        title_words = [w for w in clean_title.split() if len(w) > 2]
+                        
+                        if not title_words:
+                            if clean_title.strip() in clean_item:
+                                title_match = True
+                                break
+                            continue
+                        
+                        # ALL significant title words must be present
+                        if all(w in clean_item_words for w in title_words):
+                            title_match = True
+                            logger.debug(f"Word match: all words of '{title}' in '{item.name}'")
                             break
 
                 if not title_match:
                     continue
+                
+                # Log which folder matched
+                logger.debug(f"Folder matched: {item.name} for show: {show_title}")
 
                 # Check if folder indicates a specific season (for anime patterns validation)
                 folder_season = self._extract_season_from_name(item_name_lower)
                 
+                # Helper to validate filename also contains the show title
+                def file_title_valid(filename: str) -> bool:
+                    """
+                    STRICT validation using PTN parser.
+                    Parse the filename to extract the title, then compare with show title.
+                    This prevents 'The.Middle.S07E02' from matching 'Game of Thrones'.
+                    """
+                    # Use PTN to parse the filename
+                    if PTN:
+                        try:
+                            parsed = PTN.parse(filename)
+                            extracted_title = parsed.get('title', '').lower().strip()
+                            
+                            if extracted_title:
+                                # Normalize both titles for comparison
+                                def normalize(s):
+                                    return re.sub(r'[^a-z0-9\s]', '', s.lower()).strip()
+                                
+                                extracted_norm = normalize(extracted_title)
+                                
+                                for title in titles_to_try:
+                                    title_norm = normalize(title)
+                                    
+                                    # Check for exact match or significant overlap
+                                    if extracted_norm == title_norm:
+                                        return True
+                                    
+                                    # Check if one contains the other (for abbreviated titles)
+                                    if extracted_norm in title_norm or title_norm in extracted_norm:
+                                        return True
+                                    
+                                    # Check significant word overlap (at least 50% of shorter title)
+                                    ext_words = set(extracted_norm.split())
+                                    title_words_set = set(title_norm.split())
+                                    common = ext_words & title_words_set
+                                    
+                                    # Remove short words
+                                    common = {w for w in common if len(w) > 2}
+                                    min_words = min(len(ext_words), len(title_words_set))
+                                    
+                                    if min_words > 0 and len(common) >= min_words * 0.5:
+                                        return True
+                                
+                                # No match found via PTN
+                                return False
+                        except Exception as e:
+                            logger.debug(f"PTN parsing failed for {filename}: {e}")
+                    
+                    # Fallback to word matching if PTN fails
+                    clean_fn = re.sub(r'[^a-zA-Z0-9\s]', ' ', filename.lower())
+                    fn_words = set(clean_fn.split())
+                    
+                    for title in titles_to_try:
+                        clean_t = re.sub(r'[^a-zA-Z0-9\s]', ' ', title.lower())
+                        t_words = [w for w in clean_t.split() if len(w) > 3]
+                        
+                        if not t_words:
+                            continue
+                        
+                        matches_count = sum(1 for w in t_words if w in fn_words)
+                        
+                        if len(t_words) >= 2:
+                            if matches_count >= 2:
+                                return True
+                        else:
+                            if clean_fn.startswith(t_words[0]):
+                                return True
+                    
+                    return False
+                
                 # Now check for episode match
                 if item.is_file():
-                    if self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season):
+                    # For standalone files, require title in filename
+                    if (self._file_matches_episode(item.name, season, episode, strict_patterns, anime_patterns, folder_season)
+                            and file_title_valid(item.name)):
                         matches.append(item)
                             
                 elif item.is_dir():
+                    # CRITICAL: Even for files inside folders, we MUST validate title
+                    # to prevent Game of Thrones matching The Middle files
                     try:
                         video_files = self._find_video_files(item)
                         for vf in video_files:
                             if self._file_matches_episode(vf.name, season, episode, strict_patterns, anime_patterns, folder_season):
-                                matches.append(vf)
+                                # Check if filename contains title OR if folder is an EXACT season match
+                                # (e.g., "My Hero Academia S04/" folder with "S04E01-Title.mkv" files)
+                                folder_has_show_in_name = file_title_valid(item.name)
+                                file_has_show_in_name = file_title_valid(vf.name)
+                                
+                                if folder_has_show_in_name or file_has_show_in_name:
+                                    matches.append(vf)
+                                else:
+                                    logger.debug(f"Rejected {vf.name} - no title match in folder or file")
                     except Exception as e:
                         logger.error(f"Error scanning folder {item}: {e}")
         

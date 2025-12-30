@@ -80,14 +80,18 @@ class QualityRanker:
         "Anime Time", "Anime Land", "HorribleSubs",
     ]
     
+<<<<<<< HEAD
     # Minimum seeders required (0-seeder torrents filtered unless cached)
     MIN_SEEDERS = 1
+=======
+>>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
     
     def rank_torrents(
         self,
         torrents: List[TorrentResult],
         is_anime: bool = False,
-        cached_providers: Optional[dict] = None
+        cached_providers: Optional[dict] = None,
+        dubbed_only: bool = False
     ) -> List[TorrentResult]:
         """
         Rank torrents by quality score.
@@ -96,6 +100,7 @@ class QualityRanker:
             torrents: List of torrent results
             is_anime: Whether content is anime (enables dual-audio preference)
             cached_providers: Dict mapping info_hash -> list of providers where cached
+            dubbed_only: If True, severely penalize non-dubbed content (Anime only)
         
         Returns:
             Sorted list of torrents (best first), filtered for minimum seeders
@@ -105,6 +110,7 @@ class QualityRanker:
         # Filter out 0-seeder torrents UNLESS they are cached
         filtered_torrents = []
         for torrent in torrents:
+<<<<<<< HEAD
             info_hash = torrent.info_hash.lower()
             is_cached = info_hash in cached_providers and cached_providers[info_hash]
             
@@ -117,6 +123,9 @@ class QualityRanker:
         scored_torrents = []
         for torrent in filtered_torrents:
             score = self.calculate_score(torrent, is_anime, cached_providers)
+=======
+            score = self.calculate_score(torrent, is_anime, cached_providers, dubbed_only)
+>>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
             scored_torrents.append((torrent, score))
         
         # Sort by total score, descending
@@ -128,10 +137,18 @@ class QualityRanker:
         self,
         torrent: TorrentResult,
         is_anime: bool = False,
-        cached_providers: Optional[dict] = None
+        cached_providers: Optional[dict] = None,
+        dubbed_only: bool = False
     ) -> QualityScore:
         """Calculate quality score for a single torrent"""
         cached_providers = cached_providers or {}
+        
+        # Determine strict cache status
+        is_cached = False
+        if torrent.info_hash:
+            info_hash_lower = torrent.info_hash.lower()
+            if info_hash_lower in cached_providers and cached_providers[info_hash_lower]:
+                is_cached = True
         
         score = QualityScore()
         
@@ -169,14 +186,20 @@ class QualityRanker:
             else:
                 score.size_score = 10  # Suspiciously small
         
+<<<<<<< HEAD
         # Seeders score - heavily penalize 0-seeder uncached torrents
         info_hash = torrent.info_hash.lower()
         is_cached = info_hash in cached_providers and cached_providers[info_hash]
+=======
+        # Seeders score - significant boost to prefer healthy torrents
+        # Only relevant if NOT cached or Usenet (cached/usenet are instant) (Usenet usually reports 0 seeds)
+>>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
         
         if torrent.seeders is not None:
             if torrent.seeders >= 100:
-                score.seeders_score = 50
+                score.seeders_score = 200
             elif torrent.seeders >= 50:
+<<<<<<< HEAD
                 score.seeders_score = 40
             elif torrent.seeders >= 10:
                 score.seeders_score = 30
@@ -185,6 +208,24 @@ class QualityRanker:
             elif torrent.seeders == 0 and not is_cached:
                 # Heavy penalty for 0-seeder non-cached torrents
                 score.seeders_score = -5000
+=======
+                score.seeders_score = 150
+            elif torrent.seeders >= 20:
+                score.seeders_score = 100
+            elif torrent.seeders >= 5:
+                score.seeders_score = 50
+            elif torrent.seeders > 0:
+                # 1-4 seeders: No bonus, but apply penalty if not cached
+                if not is_cached and not torrent.is_usenet:
+                    score.seeders_score = -2000 # Discourage risky/slow torrents
+            else:
+                # 0 seeders
+                if not is_cached and not torrent.is_usenet:
+                    score.seeders_score = -10000 # Nuked. Dead torrent.
+        elif not is_cached and not torrent.is_usenet:
+             # Unknown seeds on uncached torrent -> assume bad
+             score.seeders_score = -2000
+>>>>>>> 0e9a5ef4c10265fb95782c2f1ed81631f6ce483f
         
         # Calculate base total
         score.total = (
@@ -205,16 +246,21 @@ class QualityRanker:
         
         # Anime bonuses - strongly prefer English audio
         if is_anime:
+            is_dubbed_or_dual = False
+            
             if torrent.is_dual_audio:
                 score.total += self.ANIME_BONUSES["dual_audio"]
+                is_dubbed_or_dual = True
             elif torrent.is_dubbed:
                 score.total += self.ANIME_BONUSES["dubbed"]
+                is_dubbed_or_dual = True
             else:
                 # Check for explicit English audio markers in title
                 english_markers = ['english dub', 'eng dub', 'english audio', 'english dubbed', 
                                    'dub[', 'dubbed', 'english]', '[eng]', '(eng)', 'english.dub']
                 if any(marker in title_lower for marker in english_markers):
                     score.total += self.ANIME_BONUSES["english_audio"]
+                    is_dubbed_or_dual = True
             
             # Penalty for Japanese-only releases when user prefers English
             japanese_only_markers = ['raw', 'japanese only', 'jap only', 'no subs', 'raws', '[raw]']
@@ -227,22 +273,36 @@ class QualityRanker:
                     if group.lower() in torrent.release_group.lower():
                         score.total += 200
                         break
+            
+            # DUBBED ONLY LOGIC
+            if dubbed_only:
+                if is_dubbed_or_dual:
+                    score.total += 5000  # Massive boost for dubbed content
+                else:
+                    score.total -= 10000 # Massive penalty for subbed/raw content
+                    
         
         # Cache bonus (massive - always prefer cached)
-        info_hash = torrent.info_hash.lower()
-        if info_hash in cached_providers and cached_providers[info_hash]:
-            score.total += 10000  # Cached is always better
-            
-            # Slight preference for Real-Debrid if both cached
-            if "real_debrid" in cached_providers[info_hash]:
-                score.total += 10
+        if torrent.info_hash:
+            info_hash = torrent.info_hash.lower()
+            if info_hash in cached_providers and cached_providers[info_hash]:
+                score.total += 10000  # Cached is always better
+                
+                # Slight preference for Real-Debrid if both cached
+                if "real_debrid" in cached_providers[info_hash]:
+                    score.total += 10
+        elif torrent.is_usenet:
+            # Usenet is effectively "cached" (available immediately)
+            # Give it a high score so it competes with cached torrents
+            score.total += 10000
         
         return score
     
     def get_best_for_anime(
         self,
         torrents: List[TorrentResult],
-        cached_providers: Optional[dict] = None
+        cached_providers: Optional[dict] = None,
+        dubbed_only: bool = False
     ) -> Optional[TorrentResult]:
         """
         Get best torrent for anime with priority:
@@ -253,7 +313,12 @@ class QualityRanker:
         5. Cached (any)
         6. Best quality (non-cached)
         """
-        ranked = self.rank_torrents(torrents, is_anime=True, cached_providers=cached_providers)
+        ranked = self.rank_torrents(
+            torrents, 
+            is_anime=True, 
+            cached_providers=cached_providers,
+            dubbed_only=dubbed_only
+        )
         return ranked[0] if ranked else None
     
     def get_best_for_movie_or_show(

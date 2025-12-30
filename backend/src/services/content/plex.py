@@ -28,28 +28,52 @@ class PlexWatchlistService:
         }
     
     async def get_watchlist(self) -> List[Dict]:
-        """Fetch all items from Plex Watchlist"""
+        """Fetch ALL items from Plex Watchlist (with pagination)"""
         if not self.token:
             logger.warning("Plex token not configured")
             return []
         
+        all_items = []
+        offset = 0
+        page_size = 50  # Plex supports up to 50 per page
+        
         try:
-            url = f"{self.DISCOVER_URL}/library/sections/watchlist/all"
-            response = await self.client.get(url, headers=self.headers)
-            response.raise_for_status()
+            while True:
+                url = f"{self.DISCOVER_URL}/library/sections/watchlist/all"
+                params = {
+                    "X-Plex-Container-Start": str(offset),
+                    "X-Plex-Container-Size": str(page_size),
+                }
+                
+                response = await self.client.get(url, headers=self.headers, params=params)
+                response.raise_for_status()
+                
+                data = response.json()
+                container = data.get("MediaContainer", {})
+                items = container.get("Metadata", [])
+                total_size = container.get("totalSize", 0)
+                
+                if not items:
+                    break
+                
+                all_items.extend(items)
+                offset += len(items)
+                
+                logger.debug(f"Fetched {len(items)} watchlist items, total: {len(all_items)}/{total_size}")
+                
+                # Check if we got all items
+                if len(all_items) >= total_size or len(items) < page_size:
+                    break
             
-            data = response.json()
-            items = data.get("MediaContainer", {}).get("Metadata", [])
-            
-            logger.info(f"Found {len(items)} items in Plex Watchlist")
-            return items
+            logger.info(f"Found {len(all_items)} items in Plex Watchlist")
+            return all_items
             
         except httpx.HTTPStatusError as e:
             logger.error(f"Plex API error: {e.response.status_code}")
-            return []
+            return all_items  # Return what we got
         except Exception as e:
             logger.error(f"Failed to fetch Plex Watchlist: {e}")
-            return []
+            return all_items
     
     async def get_item_details(self, rating_key: str) -> Optional[Dict]:
         """Get detailed metadata for a watchlist item"""

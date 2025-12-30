@@ -10,12 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models import MediaItem, MediaState, MediaType
 from src.services import (
     tmdb_service,
-    torrentio_scraper,
-    prowlarr_scraper,
     downloader,
     symlink_service,
     plex_service,
 )
+from src.services.scrapers import scrape_movie as scrape_movie_all
 from src.core.quality import quality_ranker
 
 
@@ -35,6 +34,10 @@ class StateMachine:
         Process a media item through the pipeline.
         Returns the new state.
         """
+        # Store item info BEFORE processing - needed for error handling after rollback
+        item_id = item.id
+        item_title = item.title
+        
         try:
             if item.state == MediaState.REQUESTED:
                 return await self._index_item(item, session)
@@ -55,15 +58,31 @@ class StateMachine:
                 return await self._complete_item(item, session)
             
             else:
-                logger.debug(f"Item {item.title} in terminal state: {item.state}")
+                logger.debug(f"Item {item_title} in terminal state: {item.state}")
                 return item.state
                 
         except Exception as e:
-            logger.error(f"Error processing {item.title}: {e}")
-            item.state = MediaState.FAILED
-            item.last_error = str(e)
-            item.retry_count += 1
-            await session.commit()
+            error_msg = str(e)[:500]
+            logger.error(f"Error processing {item_title} (id={item_id}): {error_msg}")
+            
+            # Rollback and use fresh session to update item
+            try:
+                await session.rollback()
+                
+                # Re-fetch and update item state
+                from sqlalchemy import select
+                stmt = select(MediaItem).where(MediaItem.id == item_id)
+                result = await session.execute(stmt)
+                fresh_item = result.scalar_one_or_none()
+                
+                if fresh_item:
+                    fresh_item.state = MediaState.FAILED
+                    fresh_item.last_error = error_msg
+                    fresh_item.retry_count += 1
+                    await session.commit()
+            except Exception as inner_e:
+                logger.warning(f"Could not update failed state for {item_title}: {inner_e}")
+            
             return MediaState.FAILED
     
     async def _index_item(self, item: MediaItem, session: AsyncSession) -> MediaState:
@@ -172,7 +191,7 @@ class StateMachine:
             logger.info(f"Stored {len(all_titles)} alternative titles for {item.title}")
     
     async def _scrape_item(self, item: MediaItem, session: AsyncSession) -> MediaState:
-        """Scrape for torrents"""
+        """Scrape for torrents using all scrapers (Torrentio + MediaFusion + Prowlarr)"""
         logger.info(f"Scraping: {item.title}")
         
         if not item.imdb_id:
@@ -181,15 +200,8 @@ class StateMachine:
             await session.commit()
             return MediaState.FAILED
         
-        # Get torrents from Torrentio
-        torrents = await torrentio_scraper.scrape_movie(item.imdb_id)
-        
-        # Also try Prowlarr if configured
-        if prowlarr_scraper.is_configured:
-            prowlarr_results = await prowlarr_scraper.search_movie(
-                item.title, item.year, item.imdb_id
-            )
-            torrents.extend(prowlarr_results)
+        # Get torrents from ALL scrapers (Torrentio + MediaFusion + Prowlarr)
+        torrents = await scrape_movie_all(item.imdb_id, title=item.title, year=item.year)
         
         if not torrents:
             logger.warning(f"No torrents found for: {item.title}")
@@ -200,23 +212,60 @@ class StateMachine:
         
         logger.info(f"Found {len(torrents)} torrents for {item.title}")
         
-        # Check cache status
+        # Check cache status (Torbox only - RD requires per-torrent check)
         info_hashes = [t.info_hash for t in torrents]
         cache_status = await downloader.check_cache_all(info_hashes)
         
-        # Rank and select best torrent
+        # Rank torrents by quality (with anime preferences)
         if item.is_anime:
-            best = quality_ranker.get_best_for_anime(torrents, cache_status)
+            # Force Dubbed Only for now as requested
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=True, cached_providers=cache_status, dubbed_only=True)
         else:
-            best = quality_ranker.get_best_for_movie_or_show(torrents, cache_status)
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=False, cached_providers=cache_status)
+        
+        if not ranked:
+            item.state = MediaState.FAILED
+            item.last_error = "No suitable torrent found"
+            await session.commit()
+            return MediaState.FAILED
+        
+        # Smart selection: check top candidates for Real-Debrid cache
+        # This does per-torrent checks but limits to top 5 to reduce API calls
+        best = None
+        is_cached = False
+        
+        # First, check if any are already known to be cached (from Torbox)
+        for t in ranked[:5]:
+            if cache_status.get(t.info_hash.lower()):
+                best = t
+                is_cached = True
+                logger.info(f"Found cached on Torbox: {t.title[:50]}...")
+                break
+        
+        # If not cached on Torbox, check top candidates on Real-Debrid
+        if not best:
+            for t in ranked[:5]:
+                rd_result = await downloader.check_instant_via_add(t.info_hash)
+                if rd_result and rd_result.get("cached"):
+                    best = t
+                    is_cached = True
+                    logger.info(f"✅ Found cached on Real-Debrid: {t.title[:50]}...")
+                    break
+        
+        # If still no cached found, take the best quality (first ranked)
+        if not best:
+            best = ranked[0]
+            is_cached = False
+            logger.info(f"⚠️ No cached found, taking best quality: {best.title[:50]}...")
         
         if best:
-            # Store selected torrent info on item (simplified - in real impl would use TorrentInfo model)
-            item.file_path = best.info_hash  # Temporarily store hash here
-            providers = cache_status.get(best.info_hash.lower(), [])
-            is_cached = len(providers) > 0
-            
-            logger.info(f"Selected: {best.title[:50]}... (cached: {is_cached})")
+            # Store selected torrent info on item  
+            if best.is_usenet:
+                item.file_path = f"usenet:{best.download_url}"
+                logger.info(f"Selected Usenet: {best.title[:50]}...")
+            else:
+                item.file_path = best.info_hash
+                logger.info(f"Selected Torrent: {best.title[:50]}... (cached: {is_cached})")
             
             item.state = MediaState.SCRAPED
             await session.commit()
@@ -228,18 +277,33 @@ class StateMachine:
         return MediaState.FAILED
     
     async def _download_item(self, item: MediaItem, session: AsyncSession) -> MediaState:
-        """Add torrent to debrid service"""
+        """Add torrent or usenet item to debrid service"""
         logger.info(f"Downloading: {item.title}")
         
-        info_hash = item.file_path  # Retrieved from scrape step
-        if not info_hash:
+        file_path_or_hash = item.file_path  # Retrieved from scrape step
+        if not file_path_or_hash:
             item.state = MediaState.FAILED
             item.last_error = "No torrent hash available"
             await session.commit()
             return MediaState.FAILED
         
+        # Check if Usenet
+        is_usenet = False
+        info_hash = file_path_or_hash
+        download_url = None
+        
+        if file_path_or_hash.startswith("usenet:"):
+            is_usenet = True
+            download_url = file_path_or_hash.split("usenet:", 1)[1]
+            info_hash = None # No hash for Usenet
+            logger.info(f"Adding Usenet item: {download_url[:30]}...")
+        
         # Add to debrid
-        provider, debrid_id = await downloader.add_torrent(info_hash)
+        provider, debrid_id = await downloader.add_torrent(
+            info_hash, 
+            download_url=download_url, 
+            is_usenet=is_usenet
+        )
         
         if provider and debrid_id:
             logger.info(f"Added to {provider}: {debrid_id}")
