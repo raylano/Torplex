@@ -218,7 +218,8 @@ class StateMachine:
         
         # Rank torrents by quality (with anime preferences)
         if item.is_anime:
-            ranked = quality_ranker.rank_torrents(torrents, is_anime=True, cached_providers=cache_status)
+            # Force Dubbed Only for now as requested
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=True, cached_providers=cache_status, dubbed_only=True)
         else:
             ranked = quality_ranker.rank_torrents(torrents, is_anime=False, cached_providers=cache_status)
         

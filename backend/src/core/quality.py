@@ -80,11 +80,13 @@ class QualityRanker:
         "Anime Time", "Anime Land", "HorribleSubs",
     ]
     
+    
     def rank_torrents(
         self,
         torrents: List[TorrentResult],
         is_anime: bool = False,
-        cached_providers: Optional[dict] = None
+        cached_providers: Optional[dict] = None,
+        dubbed_only: bool = False
     ) -> List[TorrentResult]:
         """
         Rank torrents by quality score.
@@ -93,6 +95,7 @@ class QualityRanker:
             torrents: List of torrent results
             is_anime: Whether content is anime (enables dual-audio preference)
             cached_providers: Dict mapping info_hash -> list of providers where cached
+            dubbed_only: If True, severely penalize non-dubbed content (Anime only)
         
         Returns:
             Sorted list of torrents (best first)
@@ -101,7 +104,7 @@ class QualityRanker:
         
         scored_torrents = []
         for torrent in torrents:
-            score = self.calculate_score(torrent, is_anime, cached_providers)
+            score = self.calculate_score(torrent, is_anime, cached_providers, dubbed_only)
             scored_torrents.append((torrent, score))
         
         # Sort by total score, descending
@@ -113,7 +116,8 @@ class QualityRanker:
         self,
         torrent: TorrentResult,
         is_anime: bool = False,
-        cached_providers: Optional[dict] = None
+        cached_providers: Optional[dict] = None,
+        dubbed_only: bool = False
     ) -> QualityScore:
         """Calculate quality score for a single torrent"""
         cached_providers = cached_providers or {}
@@ -184,16 +188,21 @@ class QualityRanker:
         
         # Anime bonuses - strongly prefer English audio
         if is_anime:
+            is_dubbed_or_dual = False
+            
             if torrent.is_dual_audio:
                 score.total += self.ANIME_BONUSES["dual_audio"]
+                is_dubbed_or_dual = True
             elif torrent.is_dubbed:
                 score.total += self.ANIME_BONUSES["dubbed"]
+                is_dubbed_or_dual = True
             else:
                 # Check for explicit English audio markers in title
                 english_markers = ['english dub', 'eng dub', 'english audio', 'english dubbed', 
                                    'dub[', 'dubbed', 'english]', '[eng]', '(eng)', 'english.dub']
                 if any(marker in title_lower for marker in english_markers):
                     score.total += self.ANIME_BONUSES["english_audio"]
+                    is_dubbed_or_dual = True
             
             # Penalty for Japanese-only releases when user prefers English
             japanese_only_markers = ['raw', 'japanese only', 'jap only', 'no subs', 'raws', '[raw]']
@@ -206,6 +215,14 @@ class QualityRanker:
                     if group.lower() in torrent.release_group.lower():
                         score.total += 200
                         break
+            
+            # DUBBED ONLY LOGIC
+            if dubbed_only:
+                if is_dubbed_or_dual:
+                    score.total += 5000  # Massive boost for dubbed content
+                else:
+                    score.total -= 10000 # Massive penalty for subbed/raw content
+                    
         
         # Cache bonus (massive - always prefer cached)
         info_hash = torrent.info_hash.lower()
@@ -221,7 +238,8 @@ class QualityRanker:
     def get_best_for_anime(
         self,
         torrents: List[TorrentResult],
-        cached_providers: Optional[dict] = None
+        cached_providers: Optional[dict] = None,
+        dubbed_only: bool = False
     ) -> Optional[TorrentResult]:
         """
         Get best torrent for anime with priority:
@@ -232,7 +250,12 @@ class QualityRanker:
         5. Cached (any)
         6. Best quality (non-cached)
         """
-        ranked = self.rank_torrents(torrents, is_anime=True, cached_providers=cached_providers)
+        ranked = self.rank_torrents(
+            torrents, 
+            is_anime=True, 
+            cached_providers=cached_providers,
+            dubbed_only=dubbed_only
+        )
         return ranked[0] if ranked else None
     
     def get_best_for_movie_or_show(

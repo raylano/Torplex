@@ -4,6 +4,7 @@ Scans the rclone mount for existing media files and matches them to episodes.
 """
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from difflib import SequenceMatcher
 import re
 from loguru import logger
 
@@ -21,16 +22,14 @@ class MountScanner:
         self.video_extensions = {'.mkv', '.mp4', '.avi', '.m4v', '.mov'}
     
     def find_matching_folders(self, show_title: str) -> List[Path]:
-        """Find all folders that match a show title"""
+        """Find all folders that match a show title using stricter matching"""
+        from difflib import SequenceMatcher
+        
         folders = []
         clean_title = self._normalize_title(show_title)
         
-        # Get first few words for matching (handles "One Piece" matching "[AnimeRG] One Piece...")
-        title_words = [w for w in clean_title.split() if len(w) > 1][:4]  # First 4 significant words
-        
-        # Require at least 2 words to match to prevent false positives
-        # This prevents "Nature.S01E01" from matching "Dan Da Dan" just because of "Dan"
-        min_words_required = min(2, len(title_words))
+        # Hard ignore list for known false positives or bad scrapes
+        ignore_words = {"sample", "extras", "featurettes"}
         
         for subdir in ["__all__", "anime", "shows"]:
             search_path = self.mount_path / subdir
@@ -44,13 +43,25 @@ class MountScanner:
                     
                     item_clean = self._normalize_title(item.name)
                     
-                    # Count how many title words appear in folder name
-                    matching_words = sum(1 for word in title_words if word in item_clean)
+                    # 1. Quick fuzzy check: must contain at least one significant word from title
+                    # to avoid expensive full comparison on unrelated folders
+                    if not any(word in item_clean for word in clean_title.split() if len(word) > 2):
+                       continue
+
+                    # 2. Strict Similarity Check (difflib)
+                    # We want the show title to be fundamentally similar to the folder name
+                    # But folders often have extra junk (dates, resolution, group)
+                    # So we match the *prefix* or substantial part
                     
-                    # Need at least min_words_required matches
-                    if matching_words >= min_words_required:
+                    # Calculate similarity ratio
+                    ratio = SequenceMatcher(None, clean_title, item_clean).ratio()
+                    
+                    # If ratio matches high enough (e.g. > 0.8), accept it
+                    # OR if the show title is a clean prefix of the folder name (e.g. "Show Name" matching "Show Name S01")
+                    if ratio > 0.8 or item_clean.startswith(clean_title + " "):
                         folders.append(item)
-                        logger.debug(f"Matched folder: {item.name} ({matching_words}/{len(title_words)} words)")
+                        logger.debug(f"Matched folder: {item.name} (Ratio: {ratio:.2f})")
+                        
             except Exception as e:
                 logger.error(f"Error scanning {search_path}: {e}")
         

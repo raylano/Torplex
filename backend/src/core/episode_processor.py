@@ -177,9 +177,9 @@ class EpisodeProcessor:
         info_hashes = [t.info_hash for t in torrents]
         cache_status = await downloader.check_cache_all(info_hashes)
         
-        # Rank torrents by quality (with anime preferences for dual-audio)
+        # Rank torrents by quality (with anime preferences for dual-audio + DUBBED ONLY FORCE)
         if show.is_anime:
-            ranked = quality_ranker.rank_torrents(torrents, is_anime=True, cached_providers=cache_status)
+            ranked = quality_ranker.rank_torrents(torrents, is_anime=True, cached_providers=cache_status, dubbed_only=True)
         else:
             ranked = quality_ranker.rank_torrents(torrents, is_anime=False, cached_providers=cache_status)
         
