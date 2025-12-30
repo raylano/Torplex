@@ -159,15 +159,18 @@ class QualityRanker:
                 score.size_score = 10  # Suspiciously small
         
         # Seeders score
+        # Seeders score - significant boost to prefer healthy torrents
         if torrent.seeders:
             if torrent.seeders >= 100:
-                score.seeders_score = 50
+                score.seeders_score = 200
             elif torrent.seeders >= 50:
-                score.seeders_score = 40
-            elif torrent.seeders >= 10:
-                score.seeders_score = 30
-            elif torrent.seeders >= 1:
-                score.seeders_score = 20
+                score.seeders_score = 150
+            elif torrent.seeders >= 20:
+                score.seeders_score = 100
+            elif torrent.seeders >= 5:
+                score.seeders_score = 50
+            else:
+                score.seeders_score = 0 # Penalty for very low seeders
         
         # Calculate base total
         score.total = (
