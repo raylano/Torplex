@@ -439,9 +439,10 @@ class EpisodeProcessor:
                 absolute_episode_number=episode.absolute_episode_number
             )
             
-        # OPTION 3: General search in mount (fallback for Usenet or unknown torrent names)
-        # This is critical for Usenet where we don't know the folder name in advance
-        if not source_path and (episode.file_path and episode.file_path.startswith("usenet:")):
+        # OPTION 3: General search in mount (fallback for Usenet or unknown/mismatched torrent names)
+        # This is critical for Usenet and for Torbox where file structure might differ from torrent name
+        if not source_path:
+             logger.info(f"Specific torrent search failed/skipped, trying generic search for {show.title}")
              source_path = await symlink_service.find_episode(
                 show.title,
                 episode.season_number,
@@ -451,7 +452,7 @@ class EpisodeProcessor:
             )
             
              if source_path:
-                 logger.info(f"Found Usenet file via general search: {source_path.name}")
+                 logger.info(f"Found file via general search: {source_path.name}")
         
         # FALLBACK: No file_path and no torrent_name - reset to INDEXED
         # (Only if it's NOT a Usenet item - Usenet items have a file_path starting with usenet:)

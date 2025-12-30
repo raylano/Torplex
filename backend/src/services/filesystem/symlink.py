@@ -383,12 +383,12 @@ class SymlinkService:
             except Exception as e:
                 logger.error(f"Error listing files in {path}: {e}")
 
-        if not found_files:
-            logger.warning(f"No video files found in torrent folders for {torrent_name}")
-            return None
+            if not found_files:
+                logger.warning(f"No video files found in candidate folder: {path} (Empty? Skipping...)")
+                continue # Try other subdirs instead of giving up
             
-        # Sort files by size (largest first) to prefer higher quality/main files over samples or low-res duplicates
-        found_files.sort(key=lambda x: x.stat().st_size, reverse=True)
+            # Sort files by size (largest first) to prefer higher quality/main files over samples or low-res duplicates
+            found_files.sort(key=lambda x: x.stat().st_size, reverse=True)
             
         logger.info(f"Found {len(found_files)} potential video files (sorted by size): {[f.name for f in found_files[:10]]}...")
 
