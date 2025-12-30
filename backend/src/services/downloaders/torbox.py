@@ -232,9 +232,7 @@ class TorboxService:
             response = await self.client.post(
                 url,
                 headers=upload_headers,
-                files={"file": (filename, file_content, "application/json")} # Torbox might expect specific mime, but x-nzb is safer. Wait, doc says 'file'.
-                # Actually, using 'application/xml' or 'application/x-nzb' is fine.
-                # Torbox documentation doesn't strictly specify mime type but let's stick to standard behavior.
+                files={"file": (filename, file_content, "application/x-nzb")}
             )
             
             response.raise_for_status()
