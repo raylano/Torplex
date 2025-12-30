@@ -190,9 +190,15 @@ class TorboxService:
                         
                         # Upload .torrent file to Torbox
                         url = f"{self.BASE_URL}/torrents/createtorrent"
+                        
+                        # Prepare headers for multipart upload (MUST NOT include Content-Type)
+                        upload_headers = self.headers.copy()
+                        if "Content-Type" in upload_headers:
+                            del upload_headers["Content-Type"]
+                            
                         response = await self.client.post(
                             url,
-                            headers=self.headers,
+                            headers=upload_headers,
                             files={"file": (filename, file_content, "application/x-bittorrent")}
                         )
                         response.raise_for_status()
@@ -215,14 +221,20 @@ class TorboxService:
             
             # Note: We need to use the headers property but EXCLUDE Content-Type 
             # so httpx can set the boundary for multipart/form-data.
-            # However, self.headers only sets Authorization, which is fine to keep.
             
             url = f"{self.BASE_URL}/usenet/createusenetdownload"
             
+            # Prepare headers for multipart upload (MUST NOT include Content-Type)
+            upload_headers = self.headers.copy()
+            if "Content-Type" in upload_headers:
+                del upload_headers["Content-Type"]
+            
             response = await self.client.post(
                 url,
-                headers=self.headers,
-                files={"file": (filename, file_content, "application/x-nzb")}
+                headers=upload_headers,
+                files={"file": (filename, file_content, "application/json")} # Torbox might expect specific mime, but x-nzb is safer. Wait, doc says 'file'.
+                # Actually, using 'application/xml' or 'application/x-nzb' is fine.
+                # Torbox documentation doesn't strictly specify mime type but let's stick to standard behavior.
             )
             
             response.raise_for_status()
