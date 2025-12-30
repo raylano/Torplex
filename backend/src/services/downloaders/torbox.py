@@ -229,12 +229,15 @@ class TorboxService:
             if "Content-Type" in upload_headers:
                 del upload_headers["Content-Type"]
             
+            logger.info(f"Uploading NZB to Torbox: filename='{filename}', size={len(file_content)} bytes")
+            
             response = await self.client.post(
                 url,
                 headers=upload_headers,
                 files={"file": (filename, file_content, "application/x-nzb")}
             )
             
+            logger.info(f"Torbox upload response: {response.status_code} - {response.text}")
             response.raise_for_status()
             result = response.json()
              
@@ -244,7 +247,7 @@ class TorboxService:
                 return usenet_id
             
             error = result.get("error", result.get("detail", "Unknown error"))
-            logger.error(f"Torbox NZB upload failed: {error}")
+            logger.error(f"Torbox NZB upload failed. Result: {result}")
             return None
 
         except Exception as e:
