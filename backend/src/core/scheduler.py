@@ -12,6 +12,7 @@ from src.database import async_session
 from src.models import MediaItem, MediaState, MediaType
 from src.core.state_machine import state_machine
 from src.core.episode_processor import episode_processor
+from src.core.background_symlinker import background_symlinker
 from src.services.content import plex_service, tmdb_service
 
 
@@ -214,6 +215,16 @@ def setup_scheduler():
         id="cleanup_stale",
         name="Cleanup Stale Torrents",
         replace_existing=True,
+    )
+    
+    # Background Symlink Check (Every 15 minutes) - Independent of API
+    scheduler.add_job(
+        background_symlinker.run_check,
+        IntervalTrigger(minutes=15),
+        id="bg_symlink_check",
+        name="Background File Check",
+        replace_existing=True,
+        max_instances=1
     )
     
     logger.info("Scheduler configured with jobs")

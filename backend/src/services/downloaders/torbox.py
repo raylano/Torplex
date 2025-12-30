@@ -5,19 +5,27 @@ Handles cache checking and torrent management on Torbox
 import httpx
 from typing import Optional, List, Dict, Any
 from loguru import logger
+import httpx # Still needed for downloading NZB from Prowlarr
 from tenacity import retry, stop_after_attempt, wait_exponential
+import aiohttp # Needed for FormData in add_usenet
 
 from src.config import settings
+from src.services.api.client import RateLimitedClient
 
 
-class TorboxService:
-    """Service for interacting with Torbox API"""
+class TorboxService(RateLimitedClient):
+    """
+    Service for interacting with Torbox API.
+    Inherits concurrency limiting and backoff logic from RateLimitedClient.
+    """
     
     BASE_URL = "https://api.torbox.app/v1/api"
     
     def __init__(self):
         self.api_key = settings.torbox_api_key
-        self.client = httpx.AsyncClient(timeout=30.0)
+        # Initialize RateLimitedClient with name and concurrency limit
+        # Torbox limit is usually strict -> limit to 2 concurrent requests
+        super().__init__(name="Torbox", max_concurrent=2, base_url=self.BASE_URL)
     
     @property
     def headers(self) -> Dict[str, str]:
@@ -27,125 +35,133 @@ class TorboxService:
     def is_configured(self) -> bool:
         return bool(self.api_key)
     
-    async def _request(
+    async def _request_api(
         self,
         method: str,
         endpoint: str,
-        data: Optional[Dict] = None,
+        data: Optional[Dict] = None, # For form data (aiohttp)
         params: Optional[Dict] = None,
-        json_data: Optional[Dict] = None
-    ) -> Optional[Dict[str, Any]]:
-        """Make request to Torbox API"""
+        json_data: Optional[Dict] = None, # For JSON body (aiohttp)
+        form_data: Optional[aiohttp.FormData] = None # For multipart form data (aiohttp)
+    ) -> Optional[Any]:
+        """Wrapper for RateLimitedClient.request with Torbox-specific error handling"""
         if not self.is_configured:
             logger.warning("Torbox API key not configured")
             return None
-        
-        url = f"{self.BASE_URL}{endpoint}"
-        
+            
         try:
-            response = await self.client.request(
-                method,
-                url,
-                headers=self.headers,
-                data=data,
-                params=params,
-                json=json_data
-            )
+            # Prepare headers
+            req_headers = self.headers.copy()
             
-            if response.status_code == 401:
-                logger.error("Torbox: Invalid API key")
+            # Prepare args for aiohttp
+            # aiohttp uses 'json' for json body, 'data' for form/multipart
+            kwargs = {"headers": req_headers, "params": params}
+            if json_data:
+                kwargs["json"] = json_data
+            if data: # For simple form-urlencoded data
+                kwargs["data"] = data
+            if form_data: # For aiohttp.FormData (multipart)
+                kwargs["data"] = form_data
+                
+            response_data = await self.request(method, endpoint, **kwargs)
+            
+            if response_data is None: # RateLimitedClient.request returns None on HTTP errors
                 return None
                 
-            response.raise_for_status()
+            # Torbox returns {'success': ..., 'data': ...} or {'detail': ...} for errors
+            # RateLimitedClient already parses JSON
             
-            result = response.json()
-            
-            # Torbox returns success/data structure
-            if result.get("success"):
-                return result.get("data", {})
-            else:
-                error = result.get("error", result.get("detail", "Unknown error"))
-                logger.error(f"Torbox API error: {error}")
-                # Raise exception for retryable errors if needed, but usually logic errors return None
-                return None
-            
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 429:
-                logger.warning(f"Torbox rate limit (429). Retrying...")
-                raise e # Raise to let @retry handle it
+            # If it's a list (some endpoints return raw lists?) check first item
+            if isinstance(response_data, list):
+                return response_data
                 
-            logger.error(f"Torbox API error: {e.response.status_code} - {e.response.text}")
-            return None
+            if isinstance(response_data, dict):
+                # Handle API-level errors (200 OK but success: false)
+                if response_data.get("success") is False:
+                    error = response_data.get("error", response_data.get("detail", "Unknown error"))
+                    logger.error(f"Torbox API logical error: {error}")
+                    return None
+                    
+                # Return 'data' field if present, otherwise the whole dict
+                return response_data.get("data", response_data)
+                
+            return response_data
+
         except Exception as e:
             logger.error(f"Torbox request failed: {e}")
-            raise e # Raise other connection errors for retry
+            return None
     
     async def get_user_info(self) -> Optional[Dict]:
         """Get user account info"""
-        return await self._request("GET", "/user/me")
+        return await self._request_api("GET", "/user/me")
     
     async def check_instant_availability(self, info_hashes: List[str]) -> Dict[str, bool]:
-        """
-        Check if torrents are instantly available (cached).
-        Returns dict mapping info_hash -> is_cached
-        """
+        """Check if torrents are instantly available (cached)."""
         if not info_hashes:
             return {}
         
         cached_status = {}
-        
-        # Torbox checks hashes one by one or in small batches
         for info_hash in info_hashes:
-            result = await self._request(
+            # This is the loop causing issues. RateLimitedClient will slow it down.
+            result = await self._request_api(
                 "GET",
                 "/torrents/checkcached",
                 params={"hash": info_hash.lower()}
             )
             
-            # If result is truthy and contains the hash, it's cached
-            if result and isinstance(result, list) and len(result) > 0:
-                cached_status[info_hash.lower()] = True
-            else:
-                cached_status[info_hash.lower()] = False
+            # Torbox checkcached returns boolean list or similar truthy value?
+            # It usually returns: { "data": { "hash": true/false }, "success": true } OR list
+            # Based on previous code: "if result and isinstance(result, list)..."
+            # Let's stricter check:
+            # API documentation says it returns list of cached hashes? 
+            # Or map?
+            # Previous implementation:
+            # if result and isinstance(result, list) and len(result) > 0: -> True
+            is_cached = False
+            if result: 
+                if isinstance(result, list) and len(result) > 0:
+                    is_cached = True
+                elif isinstance(result, dict) and result.get(info_hash.lower()) is True:
+                    is_cached = True
+                elif result is True: # If API returns raw boolean
+                    is_cached = True
+                     
+            cached_status[info_hash.lower()] = is_cached
         
         cached_count = sum(1 for v in cached_status.values() if v)
         logger.debug(f"Torbox: {cached_count}/{len(info_hashes)} torrents cached")
-        
         return cached_status
-    
+
     @retry(stop=stop_after_attempt(10), wait=wait_exponential(multiplier=2, min=10, max=60))
     async def add_magnet(self, info_hash: str, name: Optional[str] = None) -> Optional[int]:
-        """
-        Add magnet link to Torbox.
-        Returns the torrent ID if successful.
-        """
+        """Add magnet link to Torbox."""
         magnet = f"magnet:?xt=urn:btih:{info_hash}"
         if name:
             magnet += f"&dn={name}"
         
-        result = await self._request(
+        # Using form data
+        result = await self._request_api(
             "POST",
             "/torrents/createtorrent",
             data={"magnet": magnet}
         )
         
-        if result and "torrent_id" in result:
+        if result and isinstance(result, dict) and "torrent_id" in result:
             logger.info(f"Torbox: Added torrent {info_hash[:8]}... -> ID: {result['torrent_id']}")
             return result["torrent_id"]
-        
         return None
     
     @retry(stop=stop_after_attempt(10), wait=wait_exponential(multiplier=2, min=10, max=60))
     async def add_usenet(self, download_url: str, name: Optional[str] = None) -> Optional[int]:
         """
         Add Usenet (NZB) to Torbox via File Upload.
-        Since Prowlarr URLs are local/internal, we must download the NZB locally
-        and upload the file content to Torbox.
+        This uses `httpx` for the *download* part (not IO bound/rate limited by Torbox),
+        but then implementation uploads to Torbox.
         """
         try:
-            # 1. Download NZB content locally
+            # 1. Download NZB content locally (from Prowlarr)
+            # Use raw httpx for this as it's not Torbox API
             logger.debug(f"Downloading NZB from Prowlarr: {download_url}")
-            # Use a separate client for the download
             async with httpx.AsyncClient(verify=False, timeout=30.0) as dl_client:
                 # Handle redirects manually to catch magnet links
                 resp = await dl_client.get(download_url, follow_redirects=False)
@@ -158,131 +174,82 @@ class TorboxService:
                         import re
                         hash_match = re.search(r'btih:([a-zA-Z0-9]+)', location)
                         if hash_match:
-                            info_hash = hash_match.group(1)
-                            return await self.add_magnet(info_hash, name)
-                        else:
-                            logger.error("Could not extract hash from magnet link")
-                            return None
+                            return await self.add_magnet(hash_match.group(1), name)
+                        return None
                             
                     # Follow HTTP redirect
                     resp = await dl_client.get(location, follow_redirects=True)
                 
                 resp.raise_for_status()
-                nzb_resp = resp
+                file_content = resp.content
                 
                 # Determine filename
-                import cgi
                 filename = "download.nzb"
-                if "content-disposition" in nzb_resp.headers:
-                    _, params = cgi.parse_header(nzb_resp.headers["content-disposition"])
-                    if "filename" in params:
-                        filename = params["filename"]
+                if name:
+                     safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
+                     filename = f"{safe_name}.nzb" if not safe_name.lower().endswith(".nzb") else safe_name
+
+            # 2. Upload file to Torbox (Usenet) using new RateLimitedClient
+            # Since RateLimitedClient uses aiohttp, we pass 'data' with MultipartWriter logic or simple FormData
+            
+            # Prepare MultiPart
+            form_data = aiohttp.FormData()
+            
+            # Determine correct endpoint based on file type (nzb or torrent)
+            target_url = "/usenet/createusenetdownload"
+            field_name = "file"
+            
+            is_torrent = False
+            # Basic check for torrent file signature 'd8:announce' or filename
+            if filename.endswith(".torrent") or file_content.startswith(b'd8:announce'):
+                logger.info("Detected .torrent file from Prowlarr, switching to torrent upload")
+                target_url = "/torrents/createtorrent"
+                is_torrent = True
                 
-                file_content = nzb_resp.content
-
-                if not filename.endswith(".nzb"):
-                    # Check if it's a torrent file
-                    if filename.endswith(".torrent") or "application/x-bittorrent" in nzb_resp.headers.get("content-type", ""):
-                        logger.info(f"Prowlarr returned a .torrent file. Switching to torrent upload.")
-                        
-                        # Upload .torrent file to Torbox
-                        url = f"{self.BASE_URL}/torrents/createtorrent"
-                        
-                        # Prepare headers for multipart upload (MUST NOT include Content-Type)
-                        upload_headers = self.headers.copy()
-                        if "Content-Type" in upload_headers:
-                            del upload_headers["Content-Type"]
-                            
-                        response = await self.client.post(
-                            url,
-                            headers=upload_headers,
-                            files={"file": (filename, file_content, "application/x-bittorrent")}
-                        )
-                        response.raise_for_status()
-                        result = response.json()
-                        
-                        if result.get("success") and result.get("data", {}).get("torrent_id"):
-                            t_id = result["data"]["torrent_id"]
-                            logger.info(f"Torbox: Uploaded .torrent file -> ID: {t_id}")
-                            return t_id
-                        return None
-                    
-                    # Default to appending .nzb if unsure (and valid size)
-                    if len(file_content) > 100:
-                         filename += ".nzb"
-                    
-            # 2. Upload file to Torbox (Usenet)
-            url = f"{self.BASE_URL}/usenet/createusenetdownload"
+            # Add file field
+            form_data.add_field(field_name, file_content, filename=filename, content_type='application/x-nzb' if not is_torrent else 'application/x-bittorrent')
             
-            # Prepare headers for multipart upload (MUST NOT include Content-Type)
-            upload_headers = self.headers.copy()
-            if "Content-Type" in upload_headers:
-                del upload_headers["Content-Type"]
+            if name and not is_torrent: # Name is not directly supported for torrent file upload
+                form_data.add_field("name", name)
+                
+            # Use raw request to handle FormData correctly if needed, or update _request_api
+            # _request_api handles 'data' kwarg which aiohttp accepts for FormData
+            result = await self._request_api("POST", target_url, form_data=form_data)
             
-            # Use provided name for filename if available to prevent "download" appearing in Torbox
-            if name:
-                safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '-', '_', '.')).strip()
-                if not safe_name.lower().endswith(".nzb"):
-                     safe_name += ".nzb"
-                filename = safe_name
+            if result:
+                # Handle differenct ID fields
+                t_id = result.get("torrent_id") or result.get("usenetdownload_id") or result.get("id")
+                if t_id:
+                     logger.info(f"Torbox: Uploaded file -> ID: {t_id}")
+                     return t_id
             
-            logger.info(f"Uploading NZB to Torbox: filename='{filename}', size={len(file_content)} bytes")
-            
-            # Ensure name is passed if available
-            files = {"file": (filename, file_content, "application/x-nzb")}
-            data = {}
-            if name:
-                 data["name"] = name
-
-            response = await self.client.post(
-                url,
-                headers=upload_headers,
-                files=files,
-                data=data
-            )
-            
-            if response.status_code != 200:
-                 logger.error(f"Torbox upload failed status: {response.status_code} - {response.text}")
-
-            response.raise_for_status()
-            result = response.json()
-             
-            if result.get("success") and result.get("data", {}).get("usenetdownload_id"):
-                usenet_id = result["data"]["usenetdownload_id"]
-                logger.info(f"Torbox: Uploaded NZB -> ID: {usenet_id}")
-                return usenet_id
-            
-            # Fallback ID field check
-            if result.get("success") and result.get("data", {}).get("id"):
-                usenet_id = result["data"]["id"]
-                logger.info(f"Torbox: Uploaded NZB -> ID: {usenet_id}")
-                return usenet_id
-            
-            error = result.get("error", result.get("detail", "Unknown error"))
-            logger.error(f"Torbox NZB upload failed. Result: {result}")
             return None
 
         except Exception as e:
-            # Check for 429 in exception if not caught by retry
             logger.error(f"Failed to process NZB add: {e}")
-            raise e # Raise to ensure retry logic catches it!
+            raise e # Re-raise to allow @retry to catch it
     
     async def get_torrent_info(self, torrent_id: int) -> Optional[Dict]:
         """Get torrent info including files"""
-        result = await self._request("GET", "/torrents/mylist", params={"id": torrent_id})
-        return result
+        result = await self._request_api("GET", "/torrents/mylist", params={"id": torrent_id})
+        # The API returns a list even for a single ID query, so we need to extract the first item
+        if isinstance(result, list) and result:
+            return result[0]
+        return None
     
     async def get_torrents(self) -> List[Dict]:
         """Get list of user's torrents"""
-        result = await self._request("GET", "/torrents/mylist")
-        return result if result and isinstance(result, list) else []
+        result = await self._request_api("GET", "/torrents/mylist")
+        # Ensure list
+        if isinstance(result, list): return result
+        return []
     
     async def delete_torrent(self, torrent_id: int) -> bool:
         """Delete a torrent"""
-        result = await self._request(
+        result = await self._request_api(
             "POST",
             "/torrents/controltorrent",
-            data={"torrent_id": torrent_id, "operation": "delete"}
+            data={"torrent_id": str(torrent_id), "operation": "delete"}
         )
         return result is not None
     
@@ -294,13 +261,16 @@ class TorboxService:
         if file_id:
             params["file_id"] = file_id
         
-        result = await self._request("GET", "/torrents/requestdl", params=params)
+        # Use simple request since this returns string/url usually
+        # But _request_api expects JSON/Dict...
+        # Let's bypass _request_api for this specific text return if needed, but RateLimitedClient returns text if not json
+        # Our _request_api wrapper tries to handle JSON structure.
+        # Assuming requestdl returns JSON with 'data' = url or 'url' key?
+        # Documentation: usually returns JSON { success: true, data: "url" }
+        result = await self._request_api("GET", "/torrents/requestdl", params=params)
         
-        if result and isinstance(result, str):
-            return result
-        elif result and "url" in result:
-            return result["url"]
-        
+        if isinstance(result, str): return result
+        if isinstance(result, dict): return result.get("url") or result.get("data")
         return None
     
     async def add_and_wait_for_ready(self, info_hash: str, name: Optional[str] = None) -> Optional[Dict]:
@@ -372,21 +342,22 @@ class TorboxService:
     # USENET METHODS
     # ==========================================================================
     
-
-    
     async def get_usenet_info(self, usenet_id: int) -> Optional[Dict]:
         """Get usenet download info including files"""
-        result = await self._request("GET", "/usenet/mylist", params={"id": usenet_id})
-        return result
+        result = await self._request_api("GET", "/usenet/mylist", params={"id": usenet_id})
+        # The API returns a list even for a single ID query, so we need to extract the first item
+        if isinstance(result, list) and result:
+            return result[0]
+        return None
     
     async def get_usenet_list(self) -> List[Dict]:
         """Get list of user's usenet downloads"""
-        result = await self._request("GET", "/usenet/mylist")
+        result = await self._request_api("GET", "/usenet/mylist")
         return result if result and isinstance(result, list) else []
     
     async def delete_usenet(self, usenet_id: int) -> bool:
         """Delete a usenet download"""
-        result = await self._request(
+        result = await self._request_api(
             "POST",
             "/usenet/controlusenetdownload",
             json_data={"usenet_id": usenet_id, "operation": "delete"}
@@ -404,16 +375,22 @@ class TorboxService:
         cached_status = {}
         
         for hash_val in hashes:
-            result = await self._request(
+            result = await self._request_api(
                 "GET",
                 "/usenet/checkcached",
                 params={"hash": hash_val}
             )
             
-            if result and isinstance(result, list) and len(result) > 0:
-                cached_status[hash_val] = True
-            else:
-                cached_status[hash_val] = False
+            is_cached = False
+            if result:
+                if isinstance(result, list) and len(result) > 0:
+                    is_cached = True
+                elif isinstance(result, dict) and result.get(hash_val) is True:
+                    is_cached = True
+                elif result is True:
+                    is_cached = True
+            
+            cached_status[hash_val] = is_cached
         
         cached_count = sum(1 for v in cached_status.values() if v)
         logger.debug(f"Torbox: {cached_count}/{len(hashes)} usenet downloads cached")
@@ -428,9 +405,9 @@ class TorboxService:
         if file_id:
             params["file_id"] = file_id
         
-        result = await self._request("GET", "/usenet/requestdl", params=params)
+        result = await self._request_api("GET", "/usenet/requestdl", params=params)
         
-        if result and isinstance(result, str):
+        if isinstance(result, str):
             return result
         elif result and "url" in result:
             return result["url"]
@@ -439,7 +416,7 @@ class TorboxService:
     
     async def close(self):
         """Close HTTP client"""
-        await self.client.aclose()
+        await super().close()
 
 
 # Singleton instance
