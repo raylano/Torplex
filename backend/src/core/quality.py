@@ -225,13 +225,18 @@ class QualityRanker:
                     
         
         # Cache bonus (massive - always prefer cached)
-        info_hash = torrent.info_hash.lower()
-        if info_hash in cached_providers and cached_providers[info_hash]:
-            score.total += 10000  # Cached is always better
-            
-            # Slight preference for Real-Debrid if both cached
-            if "real_debrid" in cached_providers[info_hash]:
-                score.total += 10
+        if torrent.info_hash:
+            info_hash = torrent.info_hash.lower()
+            if info_hash in cached_providers and cached_providers[info_hash]:
+                score.total += 10000  # Cached is always better
+                
+                # Slight preference for Real-Debrid if both cached
+                if "real_debrid" in cached_providers[info_hash]:
+                    score.total += 10
+        elif torrent.is_usenet:
+            # Usenet is effectively "cached" (available immediately)
+            # Give it a high score so it competes with cached torrents
+            score.total += 10000
         
         return score
     

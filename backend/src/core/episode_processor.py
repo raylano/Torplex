@@ -165,8 +165,18 @@ class EpisodeProcessor:
             
         except Exception as e:
             logger.error(f"Error processing episode {show.title} S{episode.season_number}E{episode.episode_number}: {e}")
-            episode.state = MediaState.FAILED
-            await session.commit()
+            # Rollback any pending transaction to clear error state
+            await session.rollback()
+            
+            try:
+                # Try to mark as FAILED in a clean transaction
+                episode.state = MediaState.FAILED
+                await session.commit()
+            except Exception as db_err:
+                # If even that fails, just rollback and give up
+                logger.error(f"Failed to save error state: {db_err}")
+                await session.rollback()
+                
             return MediaState.FAILED
     
     async def _scrape_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
