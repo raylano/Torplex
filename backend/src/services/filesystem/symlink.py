@@ -741,8 +741,20 @@ class SymlinkService:
                     else:
                         continue  # Folder is for wrong season
                 
-                # No season info anywhere - only match for season 1
+                # No season info anywhere
+                # If target season is 1, it's a match.
                 if target_season == 1:
+                    return True
+                
+                # RELAXATION FOR LONG RUNNING ANIME (e.g. One Piece):
+                # If the file matches the episode number pattern (e.g. "735")
+                # and contains NO season information, and the folder contains NO season information,
+                # we should probably accept it, especially if the episode number is high (>20).
+                # This fixes "One Piece - 735" failing to match because logic expects "S17" or "S01".
+                if int(target_episode) > 20: 
+                    # Heuristic: Normal seasons rarely have >25 episodes. 
+                    # If we are looking for Ep 735, and found a file "735" with no season conflicting info, it's a match.
+                    logger.debug(f"Allowing match for high episode number {target_episode} without season confirmation")
                     return True
         
         return False
