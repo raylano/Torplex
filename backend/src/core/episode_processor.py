@@ -225,16 +225,25 @@ class EpisodeProcessor:
         best = None
         is_cached = False
         
-        # First, check if any are already known to be cached (from Torbox)
+        # First, check if any are already known to be cached (from Torbox) or are Usenet
         for t in ranked[:5]:
-            if cache_status.get(t.info_hash.lower()):
+            if t.is_usenet:
+                # Usenet is always "cached"
+                best = t
+                is_cached = True
+                break
+                
+            if t.info_hash and cache_status.get(t.info_hash.lower()):
                 best = t
                 is_cached = True
                 break
         
-        # If not cached on Torbox, check top candidates on Real-Debrid
+        # If not cached on Torbox/Usenet, check top candidates on Real-Debrid
         if not best:
             for t in ranked[:5]:
+                if not t.info_hash:
+                    continue # Skip Usenet (already handled or invalid)
+                    
                 rd_result = await downloader.check_instant_via_add(t.info_hash)
                 if rd_result and rd_result.get("cached"):
                     best = t
