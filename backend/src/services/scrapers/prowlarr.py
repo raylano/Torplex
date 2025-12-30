@@ -176,6 +176,85 @@ class ProwlarrScraper:
             logger.error(f"Failed to get Prowlarr indexers: {e}")
             return []
     
+    async def search_movie(self, query: str, year: int = None, imdb_id: str = None) -> List[TorrentResult]:
+        """Search for a movie"""
+        # 2000 = Movies
+        search_query = f"{query} {year}" if year else query
+        return await self.search(search_query, categories=[2000], imdb_id=imdb_id)
+
+    async def search_tv(self, title: str, season: int, episode: int, imdb_id: str = None) -> List[TorrentResult]:
+        """
+        Search for a TV episode.
+        Includes heuristics for Anime Cour 2 mapping (e.g. S01E13 -> S02E01).
+        """
+        # 5000 = TV, 5070 = Anime
+        categories = [5000, 5070]
+        
+        # Standard SxxExx search
+        s_ex = f"S{season:02d}E{episode:02d}"
+        query = f"{title} {s_ex}"
+        
+        results = await self.search(query, categories=categories, imdb_id=imdb_id)
+        
+        # ANIME FALLBACK LOGIC
+        # If no results found, and it looks like a Cour 2 situation (Season 1, Ep > 12)
+        if not results and season == 1 and episode > 12:
+            logger.info(f"Prowlarr: No results for {s_ex}, trying Anime Cour 2 fallbacks...")
+            
+            # Fallback 1: Absolute Numbering (e.g. "Dan Da Dan 13")
+            # We enforce 2+ digits padding
+            abs_query = f"{title} {episode:02d}"
+            logger.debug(f"Trying absolute search: {abs_query}")
+            abs_results = await self.search(abs_query, categories=[5070], imdb_id=imdb_id)
+            if abs_results:
+                results.extend(abs_results)
+            
+            # Fallback 2: Cour 2 / Season 2 Mapping (e.g. S01E13 -> S02E01)
+            # 13 -> 1, 14 -> 2, etc.
+            s2_ep = episode - 12
+            s2_query = f"{title} S02E{s2_ep:02d}"
+            logger.debug(f"Trying S2 mapping: {s2_query}")
+            s2_results = await self.search(s2_query, categories=[5070], imdb_id=imdb_id)
+            if s2_results:
+                results.extend(s2_results)
+                
+        return results
+    
+    async def search_movie(self, query: str, year: int = None, imdb_id: str = None) -> List[TorrentResult]:
+        """Search for a movie"""
+        # 2000 = Movies
+        search_query = f"{query} {year}" if year else query
+        return await self.search(search_query, categories=[2000], imdb_id=imdb_id)
+
+    async def search_tv(self, title: str, season: int, episode: int, imdb_id: str = None) -> List[TorrentResult]:
+        """
+        Search for a TV episode.
+        Includes heuristics for Anime Cour 2 mapping (e.g. S01E13 -> S02E01).
+        """
+        # 5000 = TV, 5070 = Anime
+        categories = [5000, 5070]
+        
+        # Standard SxxExx search
+        s_ex = f"S{season:02d}E{episode:02d}"
+        query = f"{title} {s_ex}"
+        
+        results = await self.search(query, categories=categories, imdb_id=imdb_id)
+        
+        # ANIME FALLBACK LOGIC
+        # If no results found, and it looks like a Cour 2 situation (Season 1, Ep > 12)
+        if not results and season == 1 and episode > 12:
+            logger.info(f"Prowlarr: No results for {s_ex}, trying Anime Cour 2 fallbacks...")
+            
+            # Fallback 1: Absolute Numbering (e.g. "Dan Da Dan 13")
+            # We enforce 2+ digits padding
+            abs_query = f"{title} {episode:02d}"
+            logger.debug(f"Trying absolute search: {abs_query}")
+            abs_results = await self.search(abs_query, categories=[5070], imdb_id=imdb_id)
+            if abs_results:
+                results.extend(abs_results)
+                
+        return results
+    
     async def close(self):
         """Close HTTP client"""
         await self.client.aclose()
