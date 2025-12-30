@@ -122,6 +122,13 @@ class QualityRanker:
         """Calculate quality score for a single torrent"""
         cached_providers = cached_providers or {}
         
+        # Determine strict cache status
+        is_cached = False
+        if torrent.info_hash:
+            info_hash_lower = torrent.info_hash.lower()
+            if info_hash_lower in cached_providers and cached_providers[info_hash_lower]:
+                is_cached = True
+        
         score = QualityScore()
         
         # Resolution score
