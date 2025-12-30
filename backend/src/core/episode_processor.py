@@ -195,7 +195,8 @@ class EpisodeProcessor:
         logger.info(f"Found {len(torrents)} torrents for S{episode.season_number}E{episode.episode_number}")
         
         # Check cache status (Torbox only - RD requires per-torrent check)
-        info_hashes = [t.info_hash for t in torrents]
+        # Filter out Usenet items (no hash) to prevent .lower() crash
+        info_hashes = [t.info_hash for t in torrents if t.info_hash]
         cache_status = await downloader.check_cache_all(info_hashes)
         
         # Rank torrents by quality (with anime preferences for dual-audio + DUBBED ONLY FORCE)
