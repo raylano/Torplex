@@ -5,7 +5,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 
 from src.database import get_db
-from src.models import MediaItem, MediaState, Episode, EpisodeState, MediaType
+from src.models import MediaItem, MediaState, Episode, MediaType
 from src.services.filesystem.symlink import symlink_service
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class BackgroundSymlinkService:
     async def _check_item(self, item: MediaItem, session):
         """Check a single media item for files"""
         try:
-            if item.type == MediaType.Show:
+            if item.type == MediaType.SHOW:
                 await self._check_show(item, session)
             else:
                 await self._check_movie(item, session)
@@ -68,7 +68,7 @@ class BackgroundSymlinkService:
     async def _check_show(self, item: MediaItem, session):
         """Check episodes for a show"""
         # We only care about episodes that are NOT completed
-        pending_episodes = [e for e in item.episodes if e.state != EpisodeState.COMPLETED]
+        pending_episodes = [e for e in item.episodes if e.state != MediaState.COMPLETED]
         
         if not pending_episodes:
             return
@@ -107,7 +107,7 @@ class BackgroundSymlinkService:
                 )
                 
                 if target:
-                    episode.state = EpisodeState.COMPLETED
+                    episode.state = MediaState.COMPLETED
                     episode.file_path = str(target)
                     session.add(episode)
                     await session.commit() 
