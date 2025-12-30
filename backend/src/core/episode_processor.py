@@ -253,6 +253,26 @@ class EpisodeProcessor:
 
         # If standard torrent, try Riven-style instant check first
         if not is_usenet:
+            # OPTION 0: Check if this torrent is ALREADY active for another episode of this show
+            # This prevents adding the same Season Pack 24 times
+            existing_active = await session.execute(
+                select(Episode).where(
+                    Episode.show_id == show.id,
+                    Episode.file_path == info_hash,
+                    Episode.state.in_([MediaState.DOWNLOADED, MediaState.SYMLINKED, MediaState.COMPLETED]),
+                    Episode.id != episode.id
+                ).limit(1)
+            )
+            existing_ep = existing_active.scalars().first()
+            
+            if existing_ep and existing_ep.torrent_name:
+                # Reuse the existing download!
+                episode.torrent_name = existing_ep.torrent_name
+                episode.state = MediaState.DOWNLOADED
+                await session.commit()
+                logger.info(f"♻️ Reusing active torrent from S{existing_ep.season_number}E{existing_ep.episode_number}: {episode.torrent_name[:40]}...")
+                return MediaState.DOWNLOADED
+
             instant = await downloader.check_instant_via_add(info_hash)
             
             if instant and instant.get("cached"):
