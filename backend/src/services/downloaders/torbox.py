@@ -184,11 +184,32 @@ class TorboxService:
                         filename = params["filename"]
                 
                 if not filename.endswith(".nzb"):
+                    # Check if it's a torrent file
+                    if filename.endswith(".torrent") or "application/x-bittorrent" in nzb_resp.headers.get("content-type", ""):
+                        logger.info(f"Prowlarr returned a .torrent file. Switching to torrent upload.")
+                        
+                        # Upload .torrent file to Torbox
+                        url = f"{self.BASE_URL}/torrents/createtorrent"
+                        response = await self.client.post(
+                            url,
+                            headers=self.headers,
+                            files={"file": (filename, file_content, "application/x-bittorrent")}
+                        )
+                        response.raise_for_status()
+                        result = response.json()
+                        
+                        if result.get("success") and result.get("data", {}).get("torrent_id"):
+                            t_id = result["data"]["torrent_id"]
+                            logger.info(f"Torbox: Uploaded .torrent file -> ID: {t_id}")
+                            return t_id
+                        return None
+                    
+                    # Default to appending .nzb if unsure
                     filename += ".nzb"
                     
                 file_content = nzb_resp.content
 
-            # 2. Upload file to Torbox
+            # 2. Upload file to Torbox (Usenet)
             # Use lower-level client.request to handle multipart properly if needed,
             # but httpx handles 'files' arg nicely.
             
@@ -217,8 +238,9 @@ class TorboxService:
             return None
 
         except Exception as e:
+            # Check for 429 in exception if not caught by retry
             logger.error(f"Failed to process NZB add: {e}")
-            return None
+            raise e # Raise to ensure retry logic catches it!
     
     async def get_torrent_info(self, torrent_id: int) -> Optional[Dict]:
         """Get torrent info including files"""
