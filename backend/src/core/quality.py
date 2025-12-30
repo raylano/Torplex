@@ -80,6 +80,9 @@ class QualityRanker:
         "Anime Time", "Anime Land", "HorribleSubs",
     ]
     
+    # Minimum seeders required (0-seeder torrents filtered unless cached)
+    MIN_SEEDERS = 1
+    
     def rank_torrents(
         self,
         torrents: List[TorrentResult],
@@ -95,12 +98,24 @@ class QualityRanker:
             cached_providers: Dict mapping info_hash -> list of providers where cached
         
         Returns:
-            Sorted list of torrents (best first)
+            Sorted list of torrents (best first), filtered for minimum seeders
         """
         cached_providers = cached_providers or {}
         
-        scored_torrents = []
+        # Filter out 0-seeder torrents UNLESS they are cached
+        filtered_torrents = []
         for torrent in torrents:
+            info_hash = torrent.info_hash.lower()
+            is_cached = info_hash in cached_providers and cached_providers[info_hash]
+            
+            # Allow if: cached OR has enough seeders OR seeders is unknown (None)
+            if is_cached or torrent.seeders is None or torrent.seeders >= self.MIN_SEEDERS:
+                filtered_torrents.append(torrent)
+            else:
+                logger.debug(f"Filtered out 0-seeder torrent: {torrent.title[:40]}...")
+        
+        scored_torrents = []
+        for torrent in filtered_torrents:
             score = self.calculate_score(torrent, is_anime, cached_providers)
             scored_torrents.append((torrent, score))
         
@@ -154,8 +169,11 @@ class QualityRanker:
             else:
                 score.size_score = 10  # Suspiciously small
         
-        # Seeders score
-        if torrent.seeders:
+        # Seeders score - heavily penalize 0-seeder uncached torrents
+        info_hash = torrent.info_hash.lower()
+        is_cached = info_hash in cached_providers and cached_providers[info_hash]
+        
+        if torrent.seeders is not None:
             if torrent.seeders >= 100:
                 score.seeders_score = 50
             elif torrent.seeders >= 50:
@@ -164,6 +182,9 @@ class QualityRanker:
                 score.seeders_score = 30
             elif torrent.seeders >= 1:
                 score.seeders_score = 20
+            elif torrent.seeders == 0 and not is_cached:
+                # Heavy penalty for 0-seeder non-cached torrents
+                score.seeders_score = -5000
         
         # Calculate base total
         score.total = (

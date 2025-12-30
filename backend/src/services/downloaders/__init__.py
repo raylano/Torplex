@@ -198,6 +198,30 @@ class DownloaderOrchestrator:
         logger.error(f"Failed to add torrent {info_hash[:8]}... to any provider")
         return None, None
 
+    async def add_usenet(
+        self,
+        nzb_link: str,
+        name: Optional[str] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Add usenet download via Torbox (only provider that supports usenet).
+        Real-Debrid does NOT support usenet.
+        Returns (provider_name, usenet_id) or (None, None) on failure.
+        """
+        if not self.torbox.is_configured:
+            logger.warning("Cannot add usenet: Torbox not configured (Real-Debrid doesn't support usenet)")
+            return None, None
+        
+        try:
+            usenet_id = await self.torbox.add_usenet(nzb_link, name)
+            if usenet_id:
+                logger.info(f"Added usenet download to Torbox: ID {usenet_id}")
+                return "torbox", str(usenet_id)
+        except Exception as e:
+            logger.error(f"Failed to add usenet to Torbox: {e}")
+        
+        return None, None
+
     
     async def get_best_cached_torrent(
         self,
