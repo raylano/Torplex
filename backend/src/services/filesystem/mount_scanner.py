@@ -22,13 +22,18 @@ class MountScanner:
         self.video_extensions = {'.mkv', '.mp4', '.avi', '.m4v', '.mov'}
     
     def find_matching_folders(self, show_title: str) -> List[Path]:
-        """Find all folders that match a show title using stricter matching"""
+        """
+        Find all folders that match a show title using PTN (Parse Torrent Name).
+        This mimics 'Riven-style' matching by extracting the clean title from the folder first.
+        """
         from difflib import SequenceMatcher
+        import PTN
         
         folders = []
-        clean_title = self._normalize_title(show_title)
+        # Normalize the requested show title (e.g. "Dan Da Dan" -> "dandadan")
+        target_clean = self._normalize_title(show_title)
         
-        # Hard ignore list for known false positives or bad scrapes
+        # Ignored trash words
         ignore_words = {"sample", "extras", "featurettes"}
         
         for subdir in ["__all__", "anime", "shows"]:
@@ -41,26 +46,34 @@ class MountScanner:
                     if not item.is_dir():
                         continue
                     
-                    item_clean = self._normalize_title(item.name)
+                    if item.name.lower() in ignore_words:
+                        continue
+                        
+                    # 1. Parse the folder name to get the "release title"
+                    # e.g. "Araiguma.Calcal-dan.S01E21..." -> title="Araiguma Calcal-dan"
+                    parsed = PTN.parse(item.name)
+                    folder_title_raw = parsed.get("title")
                     
-                    # 1. Quick fuzzy check: must contain at least one significant word from title
-                    # to avoid expensive full comparison on unrelated folders
-                    if not any(word in item_clean for word in clean_title.split() if len(word) > 2):
-                       continue
-
-                    # 2. Strict Similarity Check (difflib)
-                    # We want the show title to be fundamentally similar to the folder name
-                    # But folders often have extra junk (dates, resolution, group)
-                    # So we match the *prefix* or substantial part
+                    if not folder_title_raw:
+                        # Fallback if PTN fails: use the folder name excluding dots
+                        folder_title_raw = item.name.replace(".", " ")
                     
+                    # 2. Normalize the parsed title (e.g. "Araiguma Calcal-dan" -> "araigumacalcaldan")
+                    folder_clean = self._normalize_title(folder_title_raw)
+                    
+                    # 3. Compare the CLEAN titles
+                    # Now we compare "dandadan" vs "araigumacalcaldan" -> clearly NO match
+                    if not folder_clean or not target_clean:
+                        continue
+                        
                     # Calculate similarity ratio
-                    ratio = SequenceMatcher(None, clean_title, item_clean).ratio()
+                    ratio = SequenceMatcher(None, target_clean, folder_clean).ratio()
                     
-                    # If ratio matches high enough (e.g. > 0.8), accept it
-                    # OR if the show title is a clean prefix of the folder name (e.g. "Show Name" matching "Show Name S01")
-                    if ratio > 0.8 or item_clean.startswith(clean_title + " "):
+                    # Strict threshold (0.9) because we are comparing "clean vs clean" title
+                    # Also allow startswith for "The Office" matching "The Office US" situations
+                    if ratio > 0.85 or (len(target_clean) > 4 and folder_clean.startswith(target_clean)):
                         folders.append(item)
-                        logger.debug(f"Matched folder: {item.name} (Ratio: {ratio:.2f})")
+                        logger.debug(f"Matched folder: {item.name} | Parsed: '{folder_title_raw}' | Ratio: {ratio:.2f}")
                         
             except Exception as e:
                 logger.error(f"Error scanning {search_path}: {e}")
