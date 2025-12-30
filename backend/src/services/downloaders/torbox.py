@@ -155,11 +155,6 @@ class TorboxService:
                     location = resp.headers["location"]
                     if location.startswith("magnet:"):
                         logger.info(f"Prowlarr redirected to magnet link. Switching to add_magnet.")
-                        # Extract info_hash from magnet? Or just add raw magnet?
-                        # Torbox add_magnet expects info_hash usually, but let's check if we can add by magnet string
-                        # actually add_magnet impl constructs magnet from hash.
-                        # We should create a new method or extract hash.
-                        
                         import re
                         hash_match = re.search(r'btih:([a-zA-Z0-9]+)', location)
                         if hash_match:
@@ -183,6 +178,8 @@ class TorboxService:
                     if "filename" in params:
                         filename = params["filename"]
                 
+                file_content = nzb_resp.content
+
                 if not filename.endswith(".nzb"):
                     # Check if it's a torrent file
                     if filename.endswith(".torrent") or "application/x-bittorrent" in nzb_resp.headers.get("content-type", ""):
@@ -210,18 +207,11 @@ class TorboxService:
                             return t_id
                         return None
                     
-                    # Default to appending .nzb if unsure
-                    filename += ".nzb"
+                    # Default to appending .nzb if unsure (and valid size)
+                    if len(file_content) > 100:
+                         filename += ".nzb"
                     
-                file_content = nzb_resp.content
-
             # 2. Upload file to Torbox (Usenet)
-            # Use lower-level client.request to handle multipart properly if needed,
-            # but httpx handles 'files' arg nicely.
-            
-            # Note: We need to use the headers property but EXCLUDE Content-Type 
-            # so httpx can set the boundary for multipart/form-data.
-            
             url = f"{self.BASE_URL}/usenet/createusenetdownload"
             
             # Prepare headers for multipart upload (MUST NOT include Content-Type)
@@ -231,18 +221,33 @@ class TorboxService:
             
             logger.info(f"Uploading NZB to Torbox: filename='{filename}', size={len(file_content)} bytes")
             
+            # Ensure name is passed if available
+            files = {"file": (filename, file_content, "application/x-nzb")}
+            data = {}
+            if name:
+                 data["name"] = name
+
             response = await self.client.post(
                 url,
                 headers=upload_headers,
-                files={"file": (filename, file_content, "application/x-nzb")}
+                files=files,
+                data=data
             )
             
-            logger.info(f"Torbox upload response: {response.status_code} - {response.text}")
+            if response.status_code != 200:
+                 logger.error(f"Torbox upload failed status: {response.status_code} - {response.text}")
+
             response.raise_for_status()
             result = response.json()
              
-            if result.get("success") and result.get("data", {}).get("usenet_id"):
-                usenet_id = result["data"]["usenet_id"]
+            if result.get("success") and result.get("data", {}).get("usenetdownload_id"):
+                usenet_id = result["data"]["usenetdownload_id"]
+                logger.info(f"Torbox: Uploaded NZB -> ID: {usenet_id}")
+                return usenet_id
+            
+            # Fallback ID field check
+            if result.get("success") and result.get("data", {}).get("id"):
+                usenet_id = result["data"]["id"]
                 logger.info(f"Torbox: Uploaded NZB -> ID: {usenet_id}")
                 return usenet_id
             
