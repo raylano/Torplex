@@ -372,6 +372,9 @@ class EpisodeProcessor:
                 await session.commit()
                 logger.info(f"Added to {provider} (not cached, waiting): {debrid_id}")
                 return MediaState.DOWNLOADED
+            
+            # If we get here, download failed (returned None)
+            raise Exception("Downloader returned failure (None)")
                 
         except Exception as e:
             logger.error(f"❌ Download failed: {e}")
