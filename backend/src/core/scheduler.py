@@ -45,9 +45,10 @@ async def process_pending_items():
             logger.info(f"Processing {len(items)} pending items...")
         
         for item in items:
-            # Store title before try block - session may be invalid after error
-            item_title = item.title
             try:
+                # Refresh item to ensure it's not expired (prevents MissingGreenlet)
+                await session.refresh(item)
+                item_title = item.title
                 # For TV shows, create episodes after indexing
                 is_tv_show = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
                 
