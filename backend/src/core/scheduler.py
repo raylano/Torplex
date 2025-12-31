@@ -184,6 +184,16 @@ def setup_scheduler():
     """Configure scheduled jobs"""
     # ...
     
+    # 0. Process Pending Items (Every 10s)
+    scheduler.add_job(
+        process_pending_items,
+        IntervalTrigger(seconds=10),
+        id="process_pending",
+        name="Process Pending Items",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     # 1. Scraper Job (Every 15s)
     scheduler.add_job(
         process_episodes_scrape,
