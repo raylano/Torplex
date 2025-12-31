@@ -29,6 +29,8 @@ class EpisodeProcessor:
         self._symlink_retries: dict[str, int] = {}
         # Track failed download URLs/hashes to prevent retry loops
         self._failed_downloads: set[str] = set()
+        # Track currently processing IDs to prevent concurrent scheduler overlaps
+        self._processing_ids: set[int] = set()
     
     async def create_episodes_for_show(self, show: MediaItem, session: AsyncSession) -> int:
         """
@@ -148,6 +150,13 @@ class EpisodeProcessor:
         """
         Process a single episode through the pipeline.
         """
+        # Prevent concurrent processing of the same episode
+        if episode.id in self._processing_ids:
+            logger.debug(f"Skipping episode {episode.id} - already processing")
+            return episode.state
+            
+        self._processing_ids.add(episode.id)
+        
         try:
             if episode.state == MediaState.REQUESTED:
                 return await self._scrape_episode(episode, show, session)
@@ -183,6 +192,9 @@ class EpisodeProcessor:
                 await session.rollback()
                 
             return MediaState.FAILED
+        finally:
+            self._processing_ids.discard(episode.id)
+
 
     async def _scrape_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
         """Scrape torrents for a single episode using all scrapers"""
