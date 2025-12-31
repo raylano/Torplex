@@ -4,7 +4,7 @@ from typing import List
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 
-from src.database import get_db
+from src.database import async_session
 from src.models import MediaItem, MediaState, Episode, MediaType
 from src.services.filesystem.symlink import symlink_service
 
@@ -29,7 +29,7 @@ class BackgroundSymlinkService:
         logger.info("♻️ Starting background symlink check...")
         
         try:
-            async with get_db() as session:
+            async with async_session() as session:
                 # 1. Fetch all items that are NOT completed but have metadata
                 # We check REQUESTED (might have files but not scraped) and PROCESSING
                 stmt = select(MediaItem).options(
