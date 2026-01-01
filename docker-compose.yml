@@ -138,6 +138,7 @@ services:
     volumes:
       - ./config/sonarr:/config
       - ./data/media:/data/media
+      - ./data/nzb_watch:/data/nzb_watch
       - /mnt/torplex:/mnt/debrid:ro
     ports:
       - "8989:8989"
@@ -161,6 +162,7 @@ services:
     volumes:
       - ./config/radarr:/config
       - ./data/media:/data/media
+      - ./data/nzb_watch:/data/nzb_watch
       - /mnt/torplex:/mnt/debrid:ro
     ports:
       - "7878:7878"
