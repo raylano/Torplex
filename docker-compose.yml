@@ -203,7 +203,7 @@ services:
   # ============================================================================
   # WATCHLISTARR - Plex Watchlist to Sonarr/Radarr Sync
   # https://github.com/nylonee/watchlistarr
-  # Alternative to Pulsarr (more reliable Docker image)
+  # NOTE: Only syncs to regular Sonarr/Radarr - use Jellyseerr for anime routing
   # ============================================================================
   watchlistarr:
     image: nylonee/watchlistarr:latest
@@ -229,7 +229,56 @@ services:
       - torplex_net
 
   # ============================================================================
+  # SONARR ANIME - Anime TV Series Management
+  # Separate instance for anime with dual-audio preferences
+  # ============================================================================
+  sonarr-anime:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: torplex_sonarr_anime
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/sonarr-anime:/config
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "8990:8989"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # RADARR ANIME - Anime Movie Management
+  # Separate instance for anime movies with dual-audio preferences
+  # ============================================================================
+  radarr-anime:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: torplex_radarr_anime
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/radarr-anime:/config
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "7879:7878"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
   # JELLYSEERR - Request Management & Media Discovery
+  # Use this for adding content - it can route anime to anime instances!
   # ============================================================================
   jellyseerr:
     image: fallenbagel/jellyseerr:latest
@@ -246,6 +295,8 @@ services:
     depends_on:
       - sonarr
       - radarr
+      - sonarr-anime
+      - radarr-anime
     networks:
       - torplex_net
 

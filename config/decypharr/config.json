@@ -1,24 +1,23 @@
 {
-    "qbit": {
-        "port": 8282,
+    "port": "8282",
+    "log_level": "info",
+    "qbittorrent": {
         "username": "admin",
         "password": "adminadmin",
         "download_folder": "/data/media"
     },
-    "debrid": {
-        "realdebrid": {
+    "debrids": [
+        {
+            "name": "realdebrid",
             "enabled": true,
             "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA"
         },
-        "torbox": {
+        {
+            "name": "torbox",
             "enabled": true,
             "api_key": "82e025a0-193a-4d67-ab3d-4cd935502ba9"
         }
-    },
-    "arr": {
-        "check_interval": "10s",
-        "refresh_interval": "30s"
-    },
+    ],
     "symlink": {
         "enabled": true,
         "source": "/mnt/debrid",
