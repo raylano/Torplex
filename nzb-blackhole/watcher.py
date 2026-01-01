@@ -217,6 +217,14 @@ def main():
     
     try:
         while True:
+            # Poll for new files (fallback for watchdog)
+            for nzb in NZB_DIR.glob("*.nzb"):
+                if upload_nzb(nzb):
+                    try: nzb.unlink()
+                    except: pass
+                # Small pause to process
+                time.sleep(2)
+
             check_downloads()
             time.sleep(POLL_INTERVAL)
     except KeyboardInterrupt:
