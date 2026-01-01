@@ -1,6 +1,6 @@
 services:
   # ============================================================================
-  # DATABASE
+  # DATABASE (kept for potential future use)
   # ============================================================================
   postgres:
     image: postgres:16-alpine
@@ -27,6 +27,8 @@ services:
     image: ghcr.io/debridmediamanager/zurg-testing:latest
     container_name: torplex_zurg
     restart: unless-stopped
+    environment:
+      - REAL_DEBRID_TOKEN=${REAL_DEBRID_TOKEN}
     ports:
       - "9999:9999"
     volumes:
@@ -41,7 +43,7 @@ services:
       - torplex_net
 
   # ============================================================================
-  # RCLONE - FUSE Mount Provider
+  # RCLONE - FUSE Mount Provider (Combined Zurg + TorBox)
   # ============================================================================
   rclone:
     image: rclone/rclone:latest
@@ -57,7 +59,7 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - TORBOX_API_KEY=${TORBOX_API_KEY}
-      - RCLONE_CONFIG_TORBOX_USER=sir.re4per@gmail.com
+      - RCLONE_CONFIG_TORBOX_USER=${TORBOX_EMAIL}
     volumes:
       - ./config/rclone:/config/rclone
       - /mnt/torplex:/data:rshared
@@ -90,57 +92,8 @@ services:
     networks:
       - torplex_net
 
-
   # ============================================================================
-  # BACKEND - FastAPI Application
-  # ============================================================================
-  backend:
-    build: ./backend
-    container_name: torplex_backend
-    restart: unless-stopped
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://torplex:${DB_PASSWORD}@postgres:5432/torplex
-      - REAL_DEBRID_TOKEN=${REAL_DEBRID_TOKEN}
-      - TORBOX_API_KEY=${TORBOX_API_KEY}
-      - TMDB_API_KEY=${TMDB_API_KEY}
-      - PLEX_TOKEN=${PLEX_TOKEN}
-      - PLEX_URL=${PLEX_URL}
-      - PROWLARR_URL=${PROWLARR_URL}
-      - PROWLARR_API_KEY=${PROWLARR_API_KEY}
-      - MOUNT_PATH=/mnt/zurg
-      - SYMLINK_PATH=/mnt/media
-      - TZ=${TZ:-Europe/Amsterdam}
-    volumes:
-      - /mnt/torplex:/mnt/zurg:rslave  # Required for symlink resolution
-      - ./data/media:/mnt/media
-    ports:
-      - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rclone:
-        condition: service_started
-    networks:
-      - torplex_net
-
-  # ============================================================================
-  # FRONTEND - Next.js Application
-  # ============================================================================
-  frontend:
-    build: ./frontend
-    container_name: torplex_frontend
-    restart: unless-stopped
-    environment:
-      - NEXT_PUBLIC_API_URL=  # Empty = use relative paths, works with any host
-    ports:
-      - "3000:3000"
-    depends_on:
-      - backend
-    networks:
-      - torplex_net
-
-  # ============================================================================
-  # PROWLARR - Indexer Manager
+  # PROWLARR - Indexer Manager (Torrents + Usenet)
   # ============================================================================
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -172,6 +125,115 @@ services:
       - torplex_net
 
   # ============================================================================
+  # SONARR - TV Series Management
+  # ============================================================================
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: torplex_sonarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/sonarr:/config
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "8989:8989"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # RADARR - Movie Management
+  # ============================================================================
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: torplex_radarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/radarr:/config
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "7878:7878"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # DECYPHARR - Debrid Download Client + Symlink Creator
+  # Emulates qBittorrent API for Sonarr/Radarr integration
+  # ============================================================================
+  decypharr:
+    image: ghcr.io/migonzalvar/decypharr:latest
+    container_name: torplex_decypharr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/decypharr:/config
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "8282:8282"
+    depends_on:
+      - rclone
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # PULSARR - Plex Watchlist to Sonarr/Radarr Sync
+  # ============================================================================
+  pulsarr:
+    image: ghcr.io/jamcswain/pulsarr:latest
+    container_name: torplex_pulsarr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/pulsarr:/app/config
+    ports:
+      - "3003:3003"
+    depends_on:
+      - sonarr
+      - radarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # JELLYSEERR - Request Management & Media Discovery
+  # ============================================================================
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: torplex_jellyseerr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/jellyseerr:/app/config
+    ports:
+      - "5055:5055"
+    depends_on:
+      - sonarr
+      - radarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
   # PLEX - Media Server
   # ============================================================================
   plex:
@@ -188,7 +250,57 @@ services:
     volumes:
       - ./config/plex:/config
       - ./data/media:/data/media:rslave
-      - /mnt/torplex:/mnt/zurg:rslave  # Required for symlink resolution  # Required for symlink resolution
+      - /mnt/torplex:/mnt/debrid:rslave
+
+  # ============================================================================
+  # TORPLEX BACKEND - (DISABLED - arr-stack takes over)
+  # Uncomment to re-enable custom Torplex backend
+  # ============================================================================
+  # backend:
+  #   build: ./backend
+  #   container_name: torplex_backend
+  #   restart: unless-stopped
+  #   environment:
+  #     - DATABASE_URL=postgresql+asyncpg://torplex:${DB_PASSWORD}@postgres:5432/torplex
+  #     - REAL_DEBRID_TOKEN=${REAL_DEBRID_TOKEN}
+  #     - TORBOX_API_KEY=${TORBOX_API_KEY}
+  #     - TMDB_API_KEY=${TMDB_API_KEY}
+  #     - PLEX_TOKEN=${PLEX_TOKEN}
+  #     - PLEX_URL=${PLEX_URL}
+  #     - PROWLARR_URL=${PROWLARR_URL}
+  #     - PROWLARR_API_KEY=${PROWLARR_API_KEY}
+  #     - MOUNT_PATH=/mnt/zurg
+  #     - SYMLINK_PATH=/mnt/media
+  #     - TZ=${TZ:-Europe/Amsterdam}
+  #   volumes:
+  #     - /mnt/torplex:/mnt/zurg:rslave
+  #     - ./data/media:/mnt/media
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     rclone:
+  #       condition: service_started
+  #   networks:
+  #     - torplex_net
+
+  # ============================================================================
+  # TORPLEX FRONTEND - (DISABLED - Jellyseerr takes over)
+  # Uncomment to re-enable custom Torplex frontend
+  # ============================================================================
+  # frontend:
+  #   build: ./frontend
+  #   container_name: torplex_frontend
+  #   restart: unless-stopped
+  #   environment:
+  #     - NEXT_PUBLIC_API_URL=
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - torplex_net
 
 networks:
   torplex_net:
