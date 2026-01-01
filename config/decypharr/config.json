@@ -1,6 +1,6 @@
 {
     "port": "8282",
-    "log_level": "info",
+    "log_level": "debug",
     "qbittorrent": {
         "username": "admin",
         "password": "adminadmin",
