@@ -1,0 +1,36 @@
+{
+    "qbit": {
+        "port": 8282,
+        "username": "admin",
+        "password": "adminadmin",
+        "download_folder": "/data/media",
+        "refresh_interval": 10
+    },
+    "debrid": {
+        "enabled": [
+            "realdebrid",
+            "torbox"
+        ],
+        "realdebrid": {
+            "api_key": "",
+            "folder": "media"
+        },
+        "torbox": {
+            "api_key": ""
+        }
+    },
+    "symlink": {
+        "enabled": true,
+        "source_folder": "/mnt/debrid",
+        "destination_folder": "/data/media",
+        "categories": {
+            "movies": "/data/media/movies",
+            "tv": "/data/media/shows",
+            "anime": "/data/media/anime"
+        }
+    },
+    "repair": {
+        "enabled": true,
+        "interval": 3600
+    }
+}

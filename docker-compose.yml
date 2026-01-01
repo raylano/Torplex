@@ -173,19 +173,26 @@ services:
   # ============================================================================
   # DECYPHARR - Debrid Download Client + Symlink Creator
   # Emulates qBittorrent API for Sonarr/Radarr integration
+  # https://github.com/sirrobot01/decypharr
   # ============================================================================
   decypharr:
-    image: ghcr.io/migonzalvar/decypharr:latest
+    image: cy01/blackhole:latest
     container_name: torplex_decypharr
     restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - TZ=${TZ:-Europe/Amsterdam}
     volumes:
-      - ./config/decypharr:/config
+      - ./config/decypharr:/app
       - ./data/media:/data/media
-      - /mnt/torplex:/mnt/debrid:ro
+      - /mnt/torplex:/mnt/debrid:rshared
     ports:
       - "8282:8282"
     depends_on:
@@ -195,9 +202,10 @@ services:
 
   # ============================================================================
   # PULSARR - Plex Watchlist to Sonarr/Radarr Sync
+  # https://github.com/jamcalli/Pulsarr
   # ============================================================================
   pulsarr:
-    image: ghcr.io/jamcswain/pulsarr:latest
+    image: ghcr.io/jamcalli/pulsarr:latest
     container_name: torplex_pulsarr
     restart: unless-stopped
     environment:
