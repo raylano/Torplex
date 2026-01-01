@@ -11,13 +11,13 @@
             "name": "realdebrid",
             "enabled": true,
             "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA",
-            "mount_folder": "/mnt/debrid"
+            "mount_folder": "/mnt/debrid/zurg"
         },
         {
             "name": "torbox",
             "enabled": true,
             "api_key": "82e025a0-193a-4d67-ab3d-4cd935502ba9",
-            "mount_folder": "/mnt/debrid"
+            "mount_folder": "/mnt/debrid/torbox"
         }
     ],
     "arrs": [

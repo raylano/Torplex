@@ -78,15 +78,35 @@ services:
             export RCLONE_CONFIG_TORBOX_PASS=$(rclone obscure "$TORBOX_API_KEY")
         fi
 
-        echo "Starting rclone mount (Combined Zurg + Torbox)..."
-        rclone mount combined: /data \
+        # Create mount directories
+        mkdir -p /data/zurg /data/torbox
+
+        echo "Starting Zurg mount..."
+        rclone mount zurg: /data/zurg \
           --allow-other \
           --allow-non-empty \
+          --vfs-cache-mode writes \
           --vfs-cache-max-size 50G \
           --vfs-read-ahead 128M \
           --dir-cache-time 10m \
           --buffer-size 32M \
-          --log-level INFO
+          --log-level INFO &
+
+        sleep 5
+
+        echo "Starting TorBox mount..."
+        rclone mount torbox: /data/torbox \
+          --allow-other \
+          --allow-non-empty \
+          --vfs-cache-mode writes \
+          --vfs-cache-max-size 50G \
+          --vfs-read-ahead 128M \
+          --dir-cache-time 10m \
+          --buffer-size 32M \
+          --log-level INFO &
+
+        # Keep container running
+        wait
     depends_on:
       - zurg
     networks:
