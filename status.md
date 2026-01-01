@@ -1,61 +1,33 @@
 # Torplex Status Report - 2026-01-01
 
-## 🎯 Doelstelling
-Volledige automatisering van Usenet (TorBox) en Torrent (Real-Debrid/TorBox) workflows binnen het Torplex ecosysteem.
+## ✅ ALLES WERKT! (23:46)
 
-## ✅ FIXES TOEGEPAST (2026-01-01 22:30)
+### Mount Status
+| Mount | Path | Status |
+|-------|------|--------|
+| **Real-Debrid (Zurg)** | `/mnt/torplex/zurg/` | ✅ Werkt |
+| **TorBox** | `/mnt/torplex/torbox/` | ✅ Werkt |
 
-### 1. Decypharr Config Fix
-**Probleem**: Real-Debrid `mount_folder` was `/mnt/debrid/__all__` maar Zurg creëert submappen (`anime/`, `shows/`, `movies/`), niet `__all__`.
-**Fix**: Gewijzigd naar `/mnt/debrid` zodat Decypharr in alle Zurg submappen kan zoeken.
+### Wat was het probleem?
+1. **4886 torrents op 0%** in Real-Debrid → Zurg moest ze allemaal syncen
+2. **Oplossing**: 0% torrents verwijderd via RD website, Zurg cache gewist
 
-### 2. Rclone Mount Propagatie Fix
-**Probleem**: Host `/mnt/torplex` zag bestanden niet die container wel zag.
-**Fixes**:
-- `privileged: true` toegevoegd aan rclone container voor betere FUSE permissies
-- Mount propagatie gewijzigd van `rshared` naar `shared` voor bidirectionele propagatie
-- Decypharr mount gewijzigd naar `rslave` (ontvangt mount updates van rclone)
-
-## ⏭️ Herstart Instructies
-
+### Herstart Commando's (voor toekomstig gebruik)
 ```bash
-# 1. Stop alle containers
-docker compose down
-
-# 2. Unmount eventuele zombie mounts op de host
-sudo umount -l /mnt/torplex 2>/dev/null || true
-
-# 3. Maak mount point aan met juiste permissies
-sudo mkdir -p /mnt/torplex
-sudo chmod 755 /mnt/torplex
-
-# 4. Start services opnieuw
-docker compose up -d
-
-# 5. Wacht ~90 seconden (60s Zurg init + 30s rclone mount)
-sleep 90
-
-# 6. Controleer mount op host
-ls -la /mnt/torplex/
-
-# 7. Check Decypharr logs voor symlink creatie
-docker logs torplex_decypharr --tail 50
+# Als mounts vastlopen:
+sudo umount -l /mnt/torplex/zurg 2>/dev/null
+sudo umount -l /mnt/torplex/torbox 2>/dev/null
+docker compose restart rclone
+sleep 70
+ls /mnt/torplex/zurg/movies/ | head -5
 ```
 
-## 📊 Wat wél werkt (Technische Backend)
-- **Zurg**: ✅ Ingelogd & Library Sync werkt (4800+ torrents).
-- **TorBox API**: ✅ Connectie werkt (`rclone lsd` geeft geen fout).
-- **Interne Rclone Link**: ✅ Container ziet *wel* alle bestanden (`rclone ls combined` toont alles).
-
-## 🔑 API Keys (In gebruik)
-| Service | Key / Config |
-| :--- | :--- |
-| **Real-Debrid** | `3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA` |
-| **TorBox API** | `82e025a0-193a-4d67-ab3d-4cd935502ba9` |
-| **TorBox Email** | `sir.re4per@gmail.com` |
-| **Plex Token** | `s34Tt9zWemQMRGzU9RB2` |
-| **Sonarr API** | `b50da35e35784b80a802eee4fac1d07c` |
-| **Radarr API** | `094b3624fdb54527a7f2d6e460ecef89` |
+### API Keys (In gebruik)
+| Service | Key |
+|---------|-----|
+| Real-Debrid | `3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA` |
+| TorBox | `82e025a0-193a-4d67-ab3d-4cd935502ba9` |
+| Plex | `s34Tt9zWemQMRGzU9RB2` |
 
 ---
-*Status: FIXES TOEGEPAST - Wacht op herstart om te valideren.*
+*Status: OPERATIONEEL*
