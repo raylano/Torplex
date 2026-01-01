@@ -201,6 +201,26 @@ services:
       - torplex_net
 
   # ============================================================================
+  # NZB-BLACKHOLE - TorBox Usenet Uploader
+  # Watches folder for NZB files and uploads to TorBox for usenet download
+  # ============================================================================
+  nzb-blackhole:
+    build: ./nzb-blackhole
+    container_name: torplex_nzb_blackhole
+    restart: unless-stopped
+    environment:
+      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - NZB_WATCH_FOLDER=/data/nzb_watch
+      - POLL_INTERVAL=10
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data/nzb_watch:/data/nzb_watch
+    depends_on:
+      - rclone
+    networks:
+      - torplex_net
+
+  # ============================================================================
   # WATCHLISTARR - Plex Watchlist to Sonarr/Radarr Sync
   # https://github.com/nylonee/watchlistarr
   # NOTE: Only syncs to regular Sonarr/Radarr - use Jellyseerr for anime routing
