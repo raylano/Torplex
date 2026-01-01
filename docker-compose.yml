@@ -197,6 +197,7 @@ services:
     image: cy01/blackhole:latest
     container_name: torplex_decypharr
     restart: unless-stopped
+    privileged: true
     devices:
       - /dev/fuse:/dev/fuse:rwm
     cap_add:
@@ -210,11 +211,9 @@ services:
     volumes:
       - ./config/decypharr:/app
       - ./data/media:/data/media
-      - /mnt/torplex:/mnt/debrid:rslave
+      - /mnt/decypharr:/mnt/decypharr:rshared
     ports:
       - "8282:8282"
-    depends_on:
-      - rclone
     networks:
       - torplex_net
 
