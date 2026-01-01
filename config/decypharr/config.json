@@ -10,12 +10,14 @@
         {
             "name": "realdebrid",
             "enabled": true,
-            "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA"
+            "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA",
+            "folder_path": "/mnt/debrid/__all__"
         },
         {
             "name": "torbox",
             "enabled": true,
-            "api_key": "82e025a0-193a-4d67-ab3d-4cd935502ba9"
+            "api_key": "82e025a0-193a-4d67-ab3d-4cd935502ba9",
+            "folder_path": "/mnt/debrid"
         }
     ],
     "arrs": [
