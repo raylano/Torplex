@@ -49,6 +49,7 @@ services:
     image: rclone/rclone:latest
     container_name: torplex_rclone
     restart: unless-stopped
+    privileged: true
     devices:
       - /dev/fuse:/dev/fuse
     cap_add:
@@ -62,7 +63,7 @@ services:
       - RCLONE_CONFIG_TORBOX_USER=${TORBOX_EMAIL}
     volumes:
       - ./config/rclone:/config/rclone
-      - /mnt/torplex:/data:rshared
+      - /mnt/torplex:/data:shared
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro
     entrypoint: ["/bin/sh", "-c"]
@@ -193,7 +194,7 @@ services:
     volumes:
       - ./config/decypharr:/app
       - ./data/media:/data/media
-      - /mnt/torplex:/mnt/debrid:rshared
+      - /mnt/torplex:/mnt/debrid:rslave
     ports:
       - "8282:8282"
     depends_on:

@@ -11,7 +11,7 @@
             "name": "realdebrid",
             "enabled": true,
             "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA",
-            "mount_folder": "/mnt/debrid/__all__"
+            "mount_folder": "/mnt/debrid"
         },
         {
             "name": "torbox",
