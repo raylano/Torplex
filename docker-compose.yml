@@ -194,7 +194,7 @@ services:
   # https://github.com/sirrobot01/decypharr
   # ============================================================================
   decypharr:
-    image: cy01/blackhole:latest
+    image: cy01/blackhole:beta
     container_name: torplex_decypharr
     restart: unless-stopped
     privileged: true
