@@ -217,6 +217,7 @@ services:
       - LOG_LEVEL=INFO
     volumes:
       - ./data/nzb_watch:/data/nzb_watch
+      - /mnt/torplex:/mnt/torplex:ro
     depends_on:
       - rclone
     networks:
