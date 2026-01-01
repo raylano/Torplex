@@ -27,6 +27,10 @@ class EpisodeProcessor:
     def __init__(self):
         # Track symlink retry attempts per episode (in-memory, resets on restart)
         self._symlink_retries: dict[str, int] = {}
+        # Track failed download URLs/hashes to prevent retry loops
+        self._failed_downloads: set[str] = set()
+        # Track currently processing IDs to prevent concurrent scheduler overlaps
+        self._processing_ids: set[int] = set()
     
     async def create_episodes_for_show(self, show: MediaItem, session: AsyncSession) -> int:
         """
@@ -146,6 +150,13 @@ class EpisodeProcessor:
         """
         Process a single episode through the pipeline.
         """
+        # Prevent concurrent processing of the same episode
+        if episode.id in self._processing_ids:
+            logger.debug(f"Skipping episode {episode.id} - already processing")
+            return episode.state
+            
+        self._processing_ids.add(episode.id)
+        
         try:
             if episode.state == MediaState.REQUESTED:
                 return await self._scrape_episode(episode, show, session)
@@ -181,7 +192,10 @@ class EpisodeProcessor:
                 await session.rollback()
                 
             return MediaState.FAILED
-    
+        finally:
+            self._processing_ids.discard(episode.id)
+
+
     async def _scrape_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
         """Scrape torrents for a single episode using all scrapers"""
         logger.info(f"Scraping: {show.title} S{episode.season_number:02d}E{episode.episode_number:02d}")
@@ -192,12 +206,6 @@ class EpisodeProcessor:
             return MediaState.FAILED
         
         if show.is_anime and not episode.absolute_episode_number and show.tmdb_id:
-            # Try to fetch global map if we haven't? 
-            # Ideally we do this once per show sync, but here we can do lazy load?
-            # Or just fetch for this episode? 
-            # Actually, `get_show_absolute_map` fetches ALL. We should probably cache it or do it in show sync.
-            # But show sync logic is complex to find. Let's do a quick lazy load here, inefficient for batch but works.
-            # BETTER: Just call it.
             try:
                 from src.services.content.tmdb import tmdb_service
                 abs_map = await tmdb_service.get_show_absolute_map(show.tmdb_id)
@@ -211,27 +219,7 @@ class EpisodeProcessor:
             except Exception as e:
                 logger.warning(f"Failed to fetch absolute number: {e}")
 
-        # Scrape using ALL scrapers (Torrentio + MediaFusion + Prowlarr)
-        # We need to pass absolute_episode_number if available (it might be None)
-        # But `scrape_episode_all` signature needs update?
-        # Let's check `scrape_episode_all` in `src.services.scrapers.__init__.py`
-        
-        # We need to update that signature first!
-        # But I can modify the call here assuming I will update the signature in next step.
-        
-        torrents = await scrape_episode_all(
-            show.imdb_id,
-            episode.season_number,
-            episode.episode_number,
-            title=show.title,
-            # We need to pass this new arg.
-            # But wait, scrape_episode_all is imported? 
-            # Yes, "from src.services.scrapers import scrape_episode as scrape_episode_all" usually?
-            # Let's check imports in this file.
-        )
-        # Actually I see: "torrents = await scrape_episode_all(..."
-        
-        # I will update the call to:
+        # Call scraper
         torrents = await scrape_episode_all(
             show.imdb_id,
             episode.season_number,
@@ -246,10 +234,21 @@ class EpisodeProcessor:
             await session.commit()
             return MediaState.FAILED
         
+        # FILTER BLACKLISTED ITEMS
+        original_count = len(torrents)
+        torrents = [t for t in torrents if t.download_url not in self._failed_downloads and (not t.info_hash or t.info_hash not in self._failed_downloads)]
+        if len(torrents) < original_count:
+            logger.info(f"Filtered {original_count - len(torrents)} blacklisted releases")
+            
+        if not torrents:
+            logger.warning(f"All torrents blacklisted for {show.title} S{episode.season_number}E{episode.episode_number}")
+            episode.state = MediaState.FAILED
+            await session.commit()
+            return MediaState.FAILED
+
         logger.info(f"Found {len(torrents)} torrents for S{episode.season_number}E{episode.episode_number}")
         
         # Check cache status (Torbox only - RD requires per-torrent check)
-        # Filter out Usenet items (no hash) to prevent .lower() crash
         info_hashes = [t.info_hash for t in torrents if t.info_hash]
         cache_status = await downloader.check_cache_all(info_hashes)
         
@@ -314,7 +313,7 @@ class EpisodeProcessor:
         episode.state = MediaState.FAILED
         await session.commit()
         return MediaState.FAILED
-    
+
     async def _download_episode(self, episode: Episode, show: MediaItem, session: AsyncSession) -> MediaState:
         """Add episode torrent or usenet item to debrid"""
         logger.info(f"Downloading: {show.title} S{episode.season_number:02d}E{episode.episode_number:02d}")
@@ -369,22 +368,40 @@ class EpisodeProcessor:
                 return MediaState.DOWNLOADED
         
         # Add to debrid (Torbox or standard RD add)
-        # Add to debrid (Torbox or standard RD add)
-        # Construct a meaningful name for Torbox/Usenet uploads
-        download_name = f"{show.title} S{episode.season_number:02d}E{episode.episode_number:02d}"
-        
-        provider, debrid_id = await downloader.add_torrent(
-            info_hash, 
-            download_url=download_url,
-            is_usenet=is_usenet,
-            name=download_name
-        )
-        
-        if provider and debrid_id:
-            episode.state = MediaState.DOWNLOADED
+        # WRAPPED IN TRY/CATCH FOR BLACKLISTING
+        try:
+            download_name = f"{show.title} S{episode.season_number:02d}E{episode.episode_number:02d}"
+            
+            provider, debrid_id = await downloader.add_torrent(
+                info_hash, 
+                download_url=download_url,
+                is_usenet=is_usenet,
+                name=download_name
+            )
+            
+            if provider and debrid_id:
+                episode.state = MediaState.DOWNLOADED
+                await session.commit()
+                logger.info(f"Added to {provider} (not cached, waiting): {debrid_id}")
+                return MediaState.DOWNLOADED
+            
+            # If we get here, download failed (returned None)
+            raise Exception("Downloader returned failure (None)")
+                
+        except Exception as e:
+            logger.error(f"❌ Download failed: {e}")
+            
+            # BLACKLIST THIS ITEM
+            bad_item = download_url if is_usenet else info_hash
+            if bad_item:
+                self._failed_downloads.add(bad_item)
+                logger.warning(f"🚫 Blacklisted item (will retry with different release): {bad_item[:50]}...")
+            
+            # RESET TO REQUESTED TO TRIGGER NEW SCRAPE (and pick next best)
+            episode.state = MediaState.REQUESTED
+            episode.file_path = None
             await session.commit()
-            logger.info(f"Added to {provider} (not cached, waiting): {debrid_id}")
-            return MediaState.DOWNLOADED
+            return MediaState.REQUESTED
         
         episode.state = MediaState.FAILED
         await session.commit()
@@ -405,8 +422,6 @@ class EpisodeProcessor:
                 logger.debug(f"Using direct file path from mount scan: {direct_path.name}")
         
         # LAZY LOAD ABSOLUTE NUMBER:
-        # If absolute number is missing (e.g. download happened before fix, or scrape missed it),
-        # try to fetch it now. Critical for Anime Usenet symlinking.
         if not episode.absolute_episode_number and show.tmdb_id:
              try:
                 from src.services.content.tmdb import tmdb_service
@@ -419,8 +434,6 @@ class EpisodeProcessor:
                         logger.info(f"Lazily set Absolute Number {episode.absolute_episode_number} for {show.title} S{episode.season_number}E{episode.episode_number}")
                 
                 # FALLBACK FOR SEASON 1:
-                # If no map found (new anime), and it's Season 1, assume Abs = Ep.
-                # This fixes 'Dan Da Dan' and other new shows.
                 elif episode.season_number == 1 and not episode.absolute_episode_number:
                      episode.absolute_episode_number = episode.episode_number
                      await session.commit()
@@ -431,7 +444,6 @@ class EpisodeProcessor:
         
         # OPTION 2: Use stored torrent_name for path construction
         if not source_path and episode.torrent_name:
-            # Pass absolute_episode_number for Anime matching (e.g. "One Piece - 1100.mkv")
             source_path = await symlink_service.find_episode_in_torrent(
                 episode.torrent_name,
                 episode.season_number,
@@ -439,15 +451,14 @@ class EpisodeProcessor:
                 absolute_episode_number=episode.absolute_episode_number
             )
             
-        # OPTION 3: General search in mount (fallback for Usenet or unknown/mismatched torrent names)
-        # This is critical for Usenet and for Torbox where file structure might differ from torrent name
+        # OPTION 3: General search in mount
         if not source_path:
              logger.info(f"Specific torrent search failed/skipped, trying generic search for {show.title}")
              source_path = await symlink_service.find_episode(
                 show.title,
                 episode.season_number,
                 episode.episode_number,
-                alternative_titles=None, # Could fetch these if needed
+                alternative_titles=None, 
                 absolute_episode_number=episode.absolute_episode_number
             )
             
@@ -455,12 +466,9 @@ class EpisodeProcessor:
                  logger.info(f"Found file via general search: {source_path.name}")
         
         # FALLBACK: No file_path and no torrent_name - reset to INDEXED
-        # (Only if it's NOT a Usenet item - Usenet items have a file_path starting with usenet:)
         is_usenet = episode.file_path and episode.file_path.startswith("usenet:")
         
         if not source_path and not episode.torrent_name and not is_usenet and not episode.file_path:
-            # No torrent_name means episode was added without proper download
-            # Reset to INDEXED so it can be re-scraped and downloaded properly
             logger.warning(f"Episode has no torrent_name, resetting to INDEXED: {show.title} S{episode.season_number}E{episode.episode_number}")
             episode.state = MediaState.INDEXED
             episode.file_path = None
@@ -470,7 +478,7 @@ class EpisodeProcessor:
         if not source_path:
             logger.warning(f"Episode file not found in mount: {show.title} S{episode.season_number}E{episode.episode_number}")
             
-            # Track retry attempts - give up after MAX_SYMLINK_RETRIES attempts
+            # Track retry attempts
             retry_key = f"symlink_{episode.id}"
             self._symlink_retries[retry_key] = self._symlink_retries.get(retry_key, 0) + 1
             
@@ -482,7 +490,6 @@ class EpisodeProcessor:
                 return MediaState.FAILED
             
             logger.debug(f"Retry {self._symlink_retries[retry_key]}/{self.MAX_SYMLINK_RETRIES} for {show.title} S{episode.season_number}E{episode.episode_number}")
-            # Don't create bad symlinks - will retry later
             return episode.state
         
         # Create symlink
@@ -522,7 +529,6 @@ class EpisodeProcessor:
             select(Episode, MediaItem)
             .join(MediaItem, Episode.show_id == MediaItem.id)
             .where(Episode.state == MediaState.SCRAPED)
-            # Prioritize items that have been scraped longest? Or just standard order.
             .order_by(Episode.updated_at)
             .limit(limit)
         )
@@ -534,12 +540,11 @@ class EpisodeProcessor:
             select(Episode, MediaItem)
             .join(MediaItem, Episode.show_id == MediaItem.id)
             .where(Episode.state == MediaState.DOWNLOADED)
-            .order_by(Episode.updated_at)
+            .order_by(Episode.updated_at) # FIFO
             .limit(limit)
         )
         return result.all()
     
-    # Deprecated but kept for compatibility/backup if needed
     async def get_pending_episodes(self, session: AsyncSession, limit: int = 10) -> List[tuple]:
         """Deprecated: Use specialized getters instead"""
         return []

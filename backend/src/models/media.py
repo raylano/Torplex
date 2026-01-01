@@ -55,6 +55,7 @@ class MediaItem(Base):
     imdb_id: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True, index=True)
     tmdb_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True, index=True)
     tvdb_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    plex_id: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True, index=True)
     
     # Basic Info
     title: Mapped[str] = mapped_column(String(500), nullable=False)

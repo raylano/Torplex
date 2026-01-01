@@ -45,9 +45,10 @@ async def process_pending_items():
             logger.info(f"Processing {len(items)} pending items...")
         
         for item in items:
-            # Store title before try block - session may be invalid after error
-            item_title = item.title
             try:
+                # Refresh item to ensure it's not expired (prevents MissingGreenlet)
+                await session.refresh(item)
+                item_title = item.title
                 # For TV shows, create episodes after indexing
                 is_tv_show = item.type in [MediaType.SHOW, MediaType.ANIME_SHOW]
                 
@@ -184,6 +185,16 @@ def setup_scheduler():
     """Configure scheduled jobs"""
     # ...
     
+    # 0. Process Pending Items (Every 10s)
+    scheduler.add_job(
+        process_pending_items,
+        IntervalTrigger(seconds=10),
+        id="process_pending",
+        name="Process Pending Items",
+        replace_existing=True,
+        max_instances=1,
+    )
+
     # 1. Scraper Job (Every 15s)
     scheduler.add_job(
         process_episodes_scrape,

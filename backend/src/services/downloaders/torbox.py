@@ -132,7 +132,7 @@ class TorboxService(RateLimitedClient):
         logger.debug(f"Torbox: {cached_count}/{len(info_hashes)} torrents cached")
         return cached_status
 
-    @retry(stop=stop_after_attempt(10), wait=wait_exponential(multiplier=2, min=10, max=60))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=20))
     async def add_magnet(self, info_hash: str, name: Optional[str] = None) -> Optional[int]:
         """Add magnet link to Torbox."""
         magnet = f"magnet:?xt=urn:btih:{info_hash}"
@@ -151,7 +151,7 @@ class TorboxService(RateLimitedClient):
             return result["torrent_id"]
         return None
     
-    @retry(stop=stop_after_attempt(10), wait=wait_exponential(multiplier=2, min=10, max=60))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=2, min=4, max=20))
     async def add_usenet(self, download_url: str, name: Optional[str] = None) -> Optional[int]:
         """
         Add Usenet (NZB) to Torbox via File Upload.
