@@ -201,19 +201,27 @@ services:
       - torplex_net
 
   # ============================================================================
-  # PULSARR - Plex Watchlist to Sonarr/Radarr Sync
-  # https://github.com/jamcalli/Pulsarr
+  # WATCHLISTARR - Plex Watchlist to Sonarr/Radarr Sync
+  # https://github.com/nylonee/watchlistarr
+  # Alternative to Pulsarr (more reliable Docker image)
   # ============================================================================
-  pulsarr:
-    image: ghcr.io/jamcalli/pulsarr:latest
-    container_name: torplex_pulsarr
+  watchlistarr:
+    image: nylonee/watchlistarr:latest
+    container_name: torplex_watchlistarr
     restart: unless-stopped
     environment:
-      - TZ=${TZ:-Europe/Amsterdam}
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - SONARR_BASE_URL=http://sonarr:8989
+      - SONARR_QUALITY_PROFILE=HD - 720p/1080p
+      - SONARR_ROOT_FOLDER=/data/media/shows
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - RADARR_BASE_URL=http://radarr:7878
+      - RADARR_QUALITY_PROFILE=HD - 720p/1080p
+      - RADARR_ROOT_FOLDER=/data/media/movies
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      - REFRESH_INTERVAL_SECONDS=60
     volumes:
-      - ./config/pulsarr:/app/config
-    ports:
-      - "3003:3003"
+      - ./config/watchlistarr:/app/config
     depends_on:
       - sonarr
       - radarr
