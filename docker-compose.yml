@@ -72,11 +72,7 @@ services:
         echo "Waiting 60 seconds for Zurg to initialize..."
         sleep 60
         
-        # Configure Torbox Password (obscured)
-        if [ -n "$TORBOX_API_KEY" ]; then
-            echo "Configuring Torbox authentication..."
-            export RCLONE_CONFIG_TORBOX_PASS=$(rclone obscure "$TORBOX_API_KEY")
-        fi
+        # Note: TorBox credentials are already configured in rclone.conf
 
         # Create mount directories
         mkdir -p /data/zurg /data/torbox
