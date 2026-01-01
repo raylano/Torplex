@@ -1,7 +1,7 @@
 zurg: v1
 
 # Real-Debrid Token
-token: "${REAL_DEBRID_TOKEN}"
+token: "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA"
 
 # Server Configuration
 host: "[::]"
