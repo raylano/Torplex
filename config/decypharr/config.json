@@ -18,6 +18,18 @@
             "api_key": "82e025a0-193a-4d67-ab3d-4cd935502ba9"
         }
     ],
+    "arrs": [
+        {
+            "name": "sonarr",
+            "host": "http://sonarr:8989",
+            "token": "b50da35e35784b80a802eee4fac1d07c"
+        },
+        {
+            "name": "radarr",
+            "host": "http://radarr:7878",
+            "token": "094b3624fdb54527a7f2d6e460ecef89"
+        }
+    ],
     "symlink": {
         "enabled": true,
         "source": "/mnt/debrid",
