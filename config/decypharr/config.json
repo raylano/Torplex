@@ -3,34 +3,29 @@
         "port": 8282,
         "username": "admin",
         "password": "adminadmin",
-        "download_folder": "/data/media",
-        "refresh_interval": 10
+        "download_folder": "/data/media"
     },
     "debrid": {
-        "enabled": [
-            "realdebrid",
-            "torbox"
-        ],
         "realdebrid": {
-            "api_key": "",
-            "folder": "media"
+            "enabled": true,
+            "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA"
         },
         "torbox": {
-            "api_key": ""
+            "enabled": true,
+            "api_key": "82e025a0-193a-4d67-ab3d-4cd935502ba9"
         }
+    },
+    "arr": {
+        "check_interval": "10s",
+        "refresh_interval": "30s"
     },
     "symlink": {
         "enabled": true,
-        "source_folder": "/mnt/debrid",
-        "destination_folder": "/data/media",
-        "categories": {
-            "movies": "/data/media/movies",
-            "tv": "/data/media/shows",
-            "anime": "/data/media/anime"
-        }
+        "source": "/mnt/debrid",
+        "destination": "/data/media"
     },
     "repair": {
         "enabled": true,
-        "interval": 3600
+        "interval": "1h"
     }
 }
