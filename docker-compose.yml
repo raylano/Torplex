@@ -45,51 +45,51 @@ services:
   # ============================================================================
   # RCLONE - FUSE Mount Provider (Combined Zurg + TorBox)
   # ============================================================================
-  # rclone:
-  #   image: rclone/rclone:latest
-  #   container_name: torplex_rclone
-  #   restart: unless-stopped
-  #   devices:
-  #     - /dev/fuse:/dev/fuse
-  #   cap_add:
-  #     - SYS_ADMIN
-  #   security_opt:
-  #     - apparmor:unconfined
-  #   environment:
-  #     - PUID=${PUID:-1000}
-  #     - PGID=${PGID:-1000}
-  #     - TORBOX_API_KEY=${TORBOX_API_KEY}
-  #     - RCLONE_CONFIG_TORBOX_USER=${TORBOX_EMAIL}
-  #   volumes:
-  #     - ./config/rclone:/config/rclone
-  #     - /mnt/torplex:/data:rshared
-  #     - /etc/passwd:/etc/passwd:ro
-  #     - /etc/group:/etc/group:ro
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   command:
-  #     - |
-  #       echo "Waiting 60 seconds for Zurg to initialize..."
-  #       sleep 60
-  #       
-  #       # Configure Torbox Password (obscured)
-  #       if [ -n "$TORBOX_API_KEY" ]; then
-  #           echo "Configuring Torbox authentication..."
-  #           export RCLONE_CONFIG_TORBOX_PASS=$(rclone obscure "$TORBOX_API_KEY")
-  #       fi
-  #
-  #       echo "Starting rclone mount (Combined Zurg + Torbox)..."
-  #       rclone mount combined: /data \
-  #         --allow-other \
-  #         --allow-non-empty \
-  #         --vfs-cache-max-size 50G \
-  #         --vfs-read-ahead 128M \
-  #         --dir-cache-time 10m \
-  #         --buffer-size 32M \
-  #         --log-level INFO
-  #   # depends_on:
-  #   #   - zurg
-  #   networks:
-  #     - torplex_net
+  rclone:
+    image: rclone/rclone:latest
+    container_name: torplex_rclone
+    restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - RCLONE_CONFIG_TORBOX_USER=${TORBOX_EMAIL}
+    volumes:
+      - ./config/rclone:/config/rclone
+      - /mnt/torplex:/data:rshared
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting 60 seconds for Zurg to initialize..."
+        sleep 60
+        
+        # Configure Torbox Password (obscured)
+        if [ -n "$TORBOX_API_KEY" ]; then
+            echo "Configuring Torbox authentication..."
+            export RCLONE_CONFIG_TORBOX_PASS=$(rclone obscure "$TORBOX_API_KEY")
+        fi
+
+        echo "Starting rclone mount (Combined Zurg + Torbox)..."
+        rclone mount combined: /data \
+          --allow-other \
+          --allow-non-empty \
+          --vfs-cache-max-size 50G \
+          --vfs-read-ahead 128M \
+          --dir-cache-time 10m \
+          --buffer-size 32M \
+          --log-level INFO
+    depends_on:
+      - zurg
+    networks:
+      - torplex_net
 
   # ============================================================================
   # PROWLARR - Indexer Manager (Torrents + Usenet)
@@ -142,7 +142,7 @@ services:
     ports:
       - "8989:8989"
     depends_on:
-      # - rclone
+      - rclone
       - prowlarr
     networks:
       - torplex_net
@@ -166,7 +166,7 @@ services:
     ports:
       - "7878:7878"
     depends_on:
-      # - rclone
+      - rclone
       - prowlarr
     networks:
       - torplex_net
@@ -269,7 +269,7 @@ services:
     ports:
       - "8990:8989"
     depends_on:
-      # - rclone
+      - rclone
       - prowlarr
     networks:
       - torplex_net
@@ -293,7 +293,7 @@ services:
     ports:
       - "7879:7878"
     depends_on:
-      # - rclone
+      - rclone
       - prowlarr
     networks:
       - torplex_net
