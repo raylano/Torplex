@@ -376,15 +376,26 @@ def main():
     setup_directories()
     check_mount_health()
 
-    # Process existing NZBs
+    # Process existing NZBs with rate limiting (max 5 per 2 minutes)
     nzbs = list(NZB_DIR.glob("*.nzb"))
     if nzbs:
-        logger.info(f"Found {len(nzbs)} existing NZBs to upload.")
-        for nzb in nzbs:
+        logger.info(f"Found {len(nzbs)} existing NZBs to upload (rate limited: 5 per 2 min).")
+        batch_size = 5
+        batch_wait = 120  # 2 minutes between batches
+        
+        for i, nzb in enumerate(nzbs):
             if upload_nzb(nzb):
                 try: nzb.unlink()
                 except: pass
-            time.sleep(5) 
+            
+            # After each upload, wait a bit
+            time.sleep(10)
+            
+            # Every 5 uploads, wait 2 minutes
+            if (i + 1) % batch_size == 0 and (i + 1) < len(nzbs):
+                remaining = len(nzbs) - (i + 1)
+                logger.info(f"Rate limit pause: waiting {batch_wait}s. {remaining} NZBs remaining.")
+                time.sleep(batch_wait) 
             
     observer = Observer()
     observer.schedule(NZBHandler(), str(NZB_DIR), recursive=False)
