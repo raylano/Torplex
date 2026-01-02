@@ -33,16 +33,36 @@ def search_show(library_key, query):
     """Search for a show in a library."""
     url = f"{PLEX_URL}/library/sections/{library_key}/search?query={query}&X-Plex-Token={PLEX_TOKEN}"
     r = requests.get(url, headers={"Accept": "application/json"})
-    data = r.json()
+    
+    # Debug
+    if r.status_code != 200:
+        print(f"❌ API Error: {r.status_code}")
+        print(f"   Response: {r.text[:200]}")
+        return []
+    
+    try:
+        data = r.json()
+    except:
+        print(f"❌ Invalid JSON response. Trying all items in library...")
+        # Fallback: get all items from library
+        url2 = f"{PLEX_URL}/library/sections/{library_key}/all?X-Plex-Token={PLEX_TOKEN}"
+        r2 = requests.get(url2, headers={"Accept": "application/json"})
+        try:
+            data = r2.json()
+        except:
+            print(f"❌ Could not parse library response")
+            return []
     
     shows = []
     for item in data.get("MediaContainer", {}).get("Metadata", []):
         if item.get("type") == "show":
-            shows.append({
-                "key": item["ratingKey"],
-                "title": item["title"],
-                "year": item.get("year", "")
-            })
+            # Check if query matches
+            if query.lower() in item.get("title", "").lower():
+                shows.append({
+                    "key": item["ratingKey"],
+                    "title": item["title"],
+                    "year": item.get("year", "")
+                })
     return shows
 
 def get_seasons(show_key):
