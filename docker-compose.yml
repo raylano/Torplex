@@ -231,7 +231,7 @@ services:
       - POLL_INTERVAL=30
       - LOG_LEVEL=INFO
       - SONARR_URL=http://sonarr:8989
-      - SONARR_API_KEY=15c5e6a5ee174c5bb3fd31ce86dcc5a1
+      - SONARR_API_KEY=b50da35e35784b80a802eee4fac1d07c
       - RADARR_URL=http://radarr:7878
       - RADARR_API_KEY=094b3624fdb54527a7f2d6e460ecef89
     volumes:
