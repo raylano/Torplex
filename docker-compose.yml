@@ -363,6 +363,7 @@ services:
       - ./config/plex:/config
       - ./data/media:/data/media:rslave
       - /mnt/torplex:/mnt/torplex:rslave
+      - /root/downloads:/root/downloads:ro
 
   # ============================================================================
   # TORPLEX BACKEND - (DISABLED - arr-stack takes over)
