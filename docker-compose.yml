@@ -63,7 +63,7 @@ services:
       - RCLONE_CONFIG_TORBOX_USER=${TORBOX_EMAIL}
     volumes:
       - ./config/rclone:/config/rclone
-      - /mnt/torplex:/data:shared
+      - /mnt/torplex:/data:rshared
       - /etc/passwd:/etc/passwd:ro
       - /etc/group:/etc/group:ro
     entrypoint: ["/bin/sh", "-c"]
@@ -81,6 +81,7 @@ services:
         rclone mount zurg: /data/zurg \
           --allow-other \
           --allow-non-empty \
+          --links \
           --vfs-cache-mode writes \
           --vfs-cache-max-size 50G \
           --vfs-read-ahead 128M \
@@ -94,6 +95,7 @@ services:
         rclone mount torbox: /data/torbox \
           --allow-other \
           --allow-non-empty \
+          --links \
           --vfs-cache-mode writes \
           --vfs-cache-max-size 50G \
           --vfs-read-ahead 128M \
@@ -197,13 +199,6 @@ services:
     image: cy01/blackhole:beta
     container_name: torplex_decypharr
     restart: unless-stopped
-    privileged: true
-    devices:
-      - /dev/fuse:/dev/fuse:rwm
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -211,9 +206,11 @@ services:
     volumes:
       - ./config/decypharr:/app
       - ./data/media:/data/media
-      - /mnt/decypharr:/mnt/decypharr:rshared
+      - /mnt/torplex:/mnt/torplex:rslave
     ports:
       - "8282:8282"
+    depends_on:
+      - rclone
     networks:
       - torplex_net
 
