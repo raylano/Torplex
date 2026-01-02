@@ -200,14 +200,27 @@ if __name__ == "__main__":
         print("🎬 Plex Bulk Downloader")
         print("=" * 40)
         print("\nUsage:")
-        print("  python3 plex_downloader.py 'One Piece' 1")
-        print("  python3 plex_downloader.py 'Show Name' <season>")
+        print("  python3 plex_downloader.py 'One Piece' 17")
+        print("  python3 plex_downloader.py 'One Piece' 17 'Anime TV (Dubs)'")
         print("\nLibraries:")
         for lib in get_libraries():
-            print(f"  - {lib['title']} ({lib['type']})")
+            print(f"  - {lib['title']} ({lib['type']}) [key={lib['key']}]")
         sys.exit(0)
     
     show_name = sys.argv[1]
     season = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+    library_name = sys.argv[3] if len(sys.argv) > 3 else None
     
-    download_season(show_name, season)
+    # Find specific library if specified
+    library_key = None
+    if library_name:
+        for lib in get_libraries():
+            if lib["title"].lower() == library_name.lower():
+                library_key = lib["key"]
+                print(f"📚 Using library: {lib['title']}")
+                break
+        if not library_key:
+            print(f"❌ Library '{library_name}' not found!")
+            sys.exit(1)
+    
+    download_season(show_name, season, library_key)
