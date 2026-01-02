@@ -5,7 +5,7 @@
         {
             "name": "realdebrid",
             "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA",
-            "folder": "/mnt/torplex/zurg",
+            "folder": "/mnt/torplex/zurg/__all__",
             "download_uncached": true
         },
         {
@@ -35,7 +35,7 @@
     },
     "symlink": {
         "enabled": true,
-        "source": "/mnt/torplex",
+        "source": "/mnt/torplex/zurg/__all__",
         "destination": "/data/media"
     },
     "repair": {

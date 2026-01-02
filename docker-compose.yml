@@ -157,7 +157,7 @@ services:
       - ./config/sonarr:/config
       - ./data/media:/data/media
       - ./data/nzb_watch:/data/nzb_watch
-      - /mnt/torplex:/mnt/debrid:ro
+      - /mnt/torplex:/mnt/torplex:ro
     ports:
       - "8989:8989"
     depends_on:
@@ -181,7 +181,7 @@ services:
       - ./config/radarr:/config
       - ./data/media:/data/media
       - ./data/nzb_watch:/data/nzb_watch
-      - /mnt/torplex:/mnt/debrid:ro
+      - /mnt/torplex:/mnt/torplex:ro
     ports:
       - "7878:7878"
     depends_on:
@@ -278,7 +278,7 @@ services:
     volumes:
       - ./config/sonarr-anime:/config
       - ./data/media:/data/media
-      - /mnt/torplex:/mnt/debrid:ro
+      - /mnt/torplex:/mnt/torplex:ro
     ports:
       - "8990:8989"
     depends_on:
@@ -302,7 +302,7 @@ services:
     volumes:
       - ./config/radarr-anime:/config
       - ./data/media:/data/media
-      - /mnt/torplex:/mnt/debrid:ro
+      - /mnt/torplex:/mnt/torplex:ro
     ports:
       - "7879:7878"
     depends_on:
@@ -352,7 +352,7 @@ services:
     volumes:
       - ./config/plex:/config
       - ./data/media:/data/media:rslave
-      - /mnt/torplex:/mnt/debrid:rslave
+      - /mnt/torplex:/mnt/torplex:rslave
 
   # ============================================================================
   # TORPLEX BACKEND - (DISABLED - arr-stack takes over)
