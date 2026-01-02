@@ -215,20 +215,28 @@ services:
       - torplex_net
 
   # ============================================================================
-  # NZB-BLACKHOLE - TorBox Usenet Uploader
-  # Watches folder for NZB files and uploads to TorBox for usenet download
+  # NZB-BLACKHOLE - TorBox Usenet Uploader + Symlinker
+  # Watches folder for NZB files, uploads to TorBox, creates symlinks
   # ============================================================================
   nzb-blackhole:
     build: ./nzb-blackhole
     container_name: torplex_nzb_blackhole
     restart: unless-stopped
     environment:
-      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - TORBOX_API_KEY=fbce2a63-f045-4cf7-87ac-cae287e0dccf
       - NZB_WATCH_FOLDER=/data/nzb_watch
-      - POLL_INTERVAL=10
+      - MOUNT_FOLDER=/mnt/torplex/torbox
+      - MEDIA_MOVIES=/data/media/movies
+      - MEDIA_SHOWS=/data/media/shows
+      - POLL_INTERVAL=30
       - LOG_LEVEL=INFO
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=15c5e6a5ee174c5bb3fd31ce86dcc5a1
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=094b3624fdb54527a7f2d6e460ecef89
     volumes:
       - ./data/nzb_watch:/data/nzb_watch
+      - ./data/media:/data/media
       - /mnt/torplex:/mnt/torplex:ro
     depends_on:
       - rclone

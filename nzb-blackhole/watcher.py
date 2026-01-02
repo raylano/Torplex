@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-TorBox Usenet Automator (V3 - State Reconstruction)
-- Scans TorBox history for COMPLETED items.
-- Checks if they match files in the mount.
-- Symlinks them.
-- Remembers processed IDs to avoid looping.
-- Handles API Rate Limits intelligently.
+TorBox Usenet Automator V4 - Full Integration
+- Scans TorBox history for COMPLETED items
+- Creates symlinks in proper media folders
+- Notifies Sonarr/Radarr when downloads complete
+- Handles API Rate Limits intelligently
 """
 
 import os
@@ -15,6 +14,7 @@ import logging
 import requests
 import shutil
 import json
+import re
 from pathlib import Path
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -22,9 +22,17 @@ from watchdog.events import FileSystemEventHandler
 # Configuration
 TORBOX_API_KEY = os.environ.get('TORBOX_API_KEY', '')
 WATCH_FOLDER = Path(os.environ.get('NZB_WATCH_FOLDER', '/data/nzb_watch'))
-MOUNT_FOLDER = Path(os.environ.get('MOUNT_FOLDER', '/mnt/torplex'))
+MOUNT_FOLDER = Path(os.environ.get('MOUNT_FOLDER', '/mnt/torplex/torbox'))
+MEDIA_MOVIES = Path(os.environ.get('MEDIA_MOVIES', '/data/media/movies'))
+MEDIA_SHOWS = Path(os.environ.get('MEDIA_SHOWS', '/data/media/shows'))
 POLL_INTERVAL = int(os.environ.get('POLL_INTERVAL', '60'))
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+
+# Sonarr/Radarr Configuration
+SONARR_URL = os.environ.get('SONARR_URL', '')
+SONARR_API_KEY = os.environ.get('SONARR_API_KEY', '')
+RADARR_URL = os.environ.get('RADARR_URL', '')
+RADARR_API_KEY = os.environ.get('RADARR_API_KEY', '')
 
 # API Endpoints
 TORBOX_API_BASE = "https://api.torbox.app/v1/api"
@@ -47,6 +55,39 @@ logger = logging.getLogger(__name__)
 
 # Track processed IDs
 processed_ids = set()
+
+# TV Show patterns
+TV_PATTERNS = [
+    r'[Ss]\d{1,2}[Ee]\d{1,2}',  # S01E01
+    r'[Ss]eason[\s\.]?\d{1,2}',  # Season 1
+    r'\d{1,2}x\d{2}',            # 1x01
+]
+
+def is_tv_show(name: str) -> bool:
+    """Detect if content is a TV show based on name patterns."""
+    for pattern in TV_PATTERNS:
+        if re.search(pattern, name, re.IGNORECASE):
+            return True
+    return False
+
+def extract_show_info(name: str) -> tuple:
+    """Extract show name and season/episode info from filename."""
+    # Try to extract show name (everything before S01E01 pattern)
+    match = re.search(r'^(.+?)[.\s]([Ss]\d{1,2})', name)
+    if match:
+        show_name = match.group(1).replace('.', ' ').strip()
+        return show_name, True
+    return name, False
+
+def extract_movie_info(name: str) -> str:
+    """Extract movie name and year from filename."""
+    # Try to extract movie name and year
+    match = re.search(r'^(.+?)[.\s](\d{4})', name)
+    if match:
+        movie_name = match.group(1).replace('.', ' ').strip()
+        year = match.group(2)
+        return f"{movie_name} ({year})"
+    return name.replace('.', ' ').strip()
 
 def load_history():
     """Load processed IDs from JSON file to prevent amnesia."""
@@ -73,6 +114,8 @@ def save_history():
 def setup_directories():
     COMPLETED_DIR.mkdir(parents=True, exist_ok=True)
     FAILED_DIR.mkdir(parents=True, exist_ok=True)
+    MEDIA_MOVIES.mkdir(parents=True, exist_ok=True)
+    MEDIA_SHOWS.mkdir(parents=True, exist_ok=True)
     load_history()
 
 def move_to_failed(nzb_path: Path):
@@ -110,7 +153,6 @@ def upload_nzb(nzb_path: Path):
                         if "limit" in detail.lower():
                              logger.warning("Rate limit hit. Sleeping 60s.")
                              time.sleep(60)
-                             # Retry logic matches outer loop
                         return False
                 elif resp.status_code == 429:
                     logger.warning(f"RATE LIMIT (429). Pausing for 60 seconds...")
@@ -141,12 +183,83 @@ def find_file_in_mount(filename_part: str) -> Path:
     except Exception: pass
     return None
 
+def find_folder_in_mount(name: str) -> Path:
+    """Find the folder containing the download in the mount."""
+    try:
+        if not MOUNT_FOLDER.exists(): return None
+        search_term = name.lower()
+        
+        # Look for directory matching the name
+        for d in MOUNT_FOLDER.iterdir():
+            if d.is_dir() and search_term in d.name.lower():
+                return d
+                
+        # Also check subdirectories
+        for d in MOUNT_FOLDER.rglob("*"):
+            if d.is_dir() and search_term in d.name.lower():
+                return d
+    except Exception:
+        pass
+    return None
+
+def create_symlink(source: Path, dest: Path) -> bool:
+    """Create a symlink, handling existing files."""
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists() or dest.is_symlink():
+            dest.unlink()
+        os.symlink(source, dest)
+        return True
+    except Exception as e:
+        logger.error(f"Symlink creation failed: {e}")
+        return False
+
+def notify_sonarr(series_name: str):
+    """Notify Sonarr to rescan for new content."""
+    if not SONARR_URL or not SONARR_API_KEY:
+        return
+    try:
+        # Trigger a rescan
+        headers = {"X-Api-Key": SONARR_API_KEY, "Content-Type": "application/json"}
+        resp = requests.post(
+            f"{SONARR_URL}/api/v3/command",
+            headers=headers,
+            json={"name": "RescanSeries"},
+            timeout=30
+        )
+        if resp.status_code == 201:
+            logger.info(f"Sonarr notified to rescan")
+        else:
+            logger.warning(f"Sonarr notification failed: {resp.status_code}")
+    except Exception as e:
+        logger.error(f"Failed to notify Sonarr: {e}")
+
+def notify_radarr(movie_name: str):
+    """Notify Radarr to rescan for new content."""
+    if not RADARR_URL or not RADARR_API_KEY:
+        return
+    try:
+        # Trigger a rescan
+        headers = {"X-Api-Key": RADARR_API_KEY, "Content-Type": "application/json"}
+        resp = requests.post(
+            f"{RADARR_URL}/api/v3/command",
+            headers=headers,
+            json={"name": "RescanMovie"},
+            timeout=30
+        )
+        if resp.status_code == 201:
+            logger.info(f"Radarr notified to rescan")
+        else:
+            logger.warning(f"Radarr notification failed: {resp.status_code}")
+    except Exception as e:
+        logger.error(f"Failed to notify Radarr: {e}")
+
 def check_mount_health():
     """Debug function to check what the script actually sees."""
     try:
         contents = list(MOUNT_FOLDER.glob("*"))
         names = [p.name for p in contents]
-        logger.info(f"Mount Check ({MOUNT_FOLDER}): {len(names)} items found. Contents: {names}")
+        logger.info(f"Mount Check ({MOUNT_FOLDER}): {len(names)} items found.")
         if not names:
             logger.warning("MOUNT APPEARS EMPTY! Please check rclone service.")
     except Exception as e:
@@ -168,7 +281,6 @@ def process_history():
             return
 
         items = resp.json().get('data', [])
-        # Iterate REVERSE to process oldest first (if needed), or standard
         
         for item in items:
             tb_id = str(item.get('id'))
@@ -181,32 +293,60 @@ def process_history():
             if state in ['completed', 'downloaded']:
                 logger.info(f"Processing Completed Item: {name} (ID: {tb_id})")
                 
-                # Try to find file
-                found_path = find_file_in_mount(name)
+                # Determine if TV or Movie
+                is_show = is_tv_show(name)
                 
-                if found_path:
-                    # Symlink
-                    try:
-                        dest_folder = COMPLETED_DIR / name
-                        dest_folder.mkdir(parents=True, exist_ok=True)
-                        dest_file = dest_folder / found_path.name
+                # Find folder/file in mount
+                found_folder = find_folder_in_mount(name)
+                found_path = find_file_in_mount(name) if not found_folder else None
+                
+                if found_folder or found_path:
+                    source = found_folder or found_path.parent
+                    
+                    # Create symlink in appropriate media folder
+                    if is_show:
+                        show_name, _ = extract_show_info(name)
+                        dest_folder = MEDIA_SHOWS / show_name
                         
-                        if dest_file.exists(): dest_file.unlink()
-                        os.symlink(found_path, dest_file)
+                        # Symlink all files in the folder
+                        if found_folder:
+                            for f in found_folder.rglob("*"):
+                                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi']:
+                                    dest_file = dest_folder / f.name
+                                    if create_symlink(f, dest_file):
+                                        logger.info(f"SHOW SYMLINK: {dest_file}")
+                        else:
+                            dest_file = dest_folder / found_path.name
+                            if create_symlink(found_path, dest_file):
+                                logger.info(f"SHOW SYMLINK: {dest_file}")
                         
-                        logger.info(f"SYMLINK CREATED: {dest_file}")
-                        processed_ids.add(tb_id)
-                        save_history()
+                        notify_sonarr(show_name)
+                    else:
+                        movie_name = extract_movie_info(name)
+                        dest_folder = MEDIA_MOVIES / movie_name
                         
-                    except Exception as e:
-                        logger.error(f"Symlink failed for {name}: {e}")
+                        # Symlink main file
+                        if found_folder:
+                            for f in found_folder.rglob("*"):
+                                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi']:
+                                    if "sample" not in f.name.lower():
+                                        dest_file = dest_folder / f.name
+                                        if create_symlink(f, dest_file):
+                                            logger.info(f"MOVIE SYMLINK: {dest_file}")
+                                        break  # Only first main file
+                        else:
+                            dest_file = dest_folder / found_path.name
+                            if create_symlink(found_path, dest_file):
+                                logger.info(f"MOVIE SYMLINK: {dest_file}")
+                        
+                        notify_radarr(movie_name)
+                    
+                    processed_ids.add(tb_id)
+                    save_history()
                 else:
-                    # Only log warning occasionally / debug
-                    # logger.debug(f"File not found in mount yet: {name}")
-                    pass
+                    logger.debug(f"File not found in mount yet: {name}")
 
             elif state in ['error', 'failed']:
-                # Mark as processed so we don't keep checking
                 if tb_id not in processed_ids:
                     logger.warning(f"Item failed in TorBox: {name}. Ignoring.")
                     processed_ids.add(tb_id)
@@ -226,10 +366,14 @@ class NZBHandler(FileSystemEventHandler):
                 except: pass
 
 def main():
-    logger.info("Starting TorBox Usenet Automator V3 (State Reconstruction)...")
-    setup_directories()
+    logger.info("Starting TorBox Usenet Automator V4 (Full Integration)...")
+    logger.info(f"Mount folder: {MOUNT_FOLDER}")
+    logger.info(f"Media movies: {MEDIA_MOVIES}")
+    logger.info(f"Media shows: {MEDIA_SHOWS}")
+    logger.info(f"Sonarr URL: {SONARR_URL or 'Not configured'}")
+    logger.info(f"Radarr URL: {RADARR_URL or 'Not configured'}")
     
-    # Check mount visibility on startup
+    setup_directories()
     check_mount_health()
 
     # Process existing NZBs
@@ -248,9 +392,6 @@ def main():
     
     try:
         while True:
-            # Periodic Mount Check (Debug)
-            # check_mount_health() 
-            
             process_history()
             time.sleep(POLL_INTERVAL)
             
