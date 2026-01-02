@@ -286,6 +286,7 @@ services:
     volumes:
       - ./config/sonarr-anime:/config
       - ./data/media:/data/media
+      - ./data/nzb_watch:/data/nzb_watch
       - /mnt/torplex:/mnt/torplex:ro
     ports:
       - "8990:8989"
@@ -310,6 +311,7 @@ services:
     volumes:
       - ./config/radarr-anime:/config
       - ./data/media:/data/media
+      - ./data/nzb_watch:/data/nzb_watch
       - /mnt/torplex:/mnt/torplex:ro
     ports:
       - "7879:7878"
