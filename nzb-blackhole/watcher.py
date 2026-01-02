@@ -366,7 +366,7 @@ class NZBHandler(FileSystemEventHandler):
                 except: pass
 
 def main():
-    logger.info("Starting TorBox Usenet Automator V4 (Full Integration)...")
+    logger.info("Starting TorBox Usenet Automator V5 (Interleaved Processing)...")
     logger.info(f"Mount folder: {MOUNT_FOLDER}")
     logger.info(f"Media movies: {MEDIA_MOVIES}")
     logger.info(f"Media shows: {MEDIA_SHOWS}")
@@ -376,35 +376,55 @@ def main():
     setup_directories()
     check_mount_health()
 
-    # Process existing NZBs with rate limiting (max 5 per 10 minutes)
-    nzbs = list(NZB_DIR.glob("*.nzb"))
-    if nzbs:
-        logger.info(f"Found {len(nzbs)} existing NZBs to upload (rate limited: 5 per 10 min).")
-        batch_size = 5
-        batch_wait = 600  # 10 minutes between batches
-        
-        for i, nzb in enumerate(nzbs):
-            if upload_nzb(nzb):
-                try: nzb.unlink()
-                except: pass
-            
-            # After each upload, wait a bit
-            time.sleep(10)
-            
-            # Every 5 uploads, wait 2 minutes
-            if (i + 1) % batch_size == 0 and (i + 1) < len(nzbs):
-                remaining = len(nzbs) - (i + 1)
-                logger.info(f"Rate limit pause: waiting {batch_wait}s. {remaining} NZBs remaining.")
-                time.sleep(batch_wait) 
-            
+    # Start file watcher for new NZBs
     observer = Observer()
     observer.schedule(NZBHandler(), str(NZB_DIR), recursive=False)
     observer.start()
     
     try:
         while True:
-            process_history()
-            time.sleep(POLL_INTERVAL)
+            # Check for existing NZBs to upload
+            nzbs = list(NZB_DIR.glob("*.nzb"))
+            
+            if nzbs:
+                batch_size = 5
+                batch_wait = 600  # 10 minutes between batches
+                
+                # Process up to batch_size NZBs
+                uploaded_count = 0
+                for nzb in nzbs[:batch_size]:
+                    if upload_nzb(nzb):
+                        try: nzb.unlink()
+                        except: pass
+                        uploaded_count += 1
+                    time.sleep(10)  # Brief pause between uploads
+                
+                remaining = len(nzbs) - uploaded_count
+                if remaining > 0:
+                    logger.info(f"Uploaded {uploaded_count} NZBs. {remaining} remaining in queue.")
+                else:
+                    logger.info(f"Uploaded {uploaded_count} NZBs. Queue empty.")
+                
+                # Poll for completed downloads and create symlinks
+                logger.info("Polling for completed downloads...")
+                process_history()
+                
+                # Wait before next batch (only if more NZBs remaining)
+                if remaining > 0:
+                    logger.info(f"Waiting {batch_wait}s before next batch...")
+                    # Split wait time to allow symlink polling in between
+                    half_wait = batch_wait // 2
+                    time.sleep(half_wait)
+                    
+                    # Poll again halfway through the wait
+                    logger.info("Mid-wait poll for completed downloads...")
+                    process_history()
+                    
+                    time.sleep(half_wait)
+            else:
+                # No NZBs to upload, just poll for completed downloads
+                process_history()
+                time.sleep(POLL_INTERVAL)
             
     except KeyboardInterrupt:
         observer.stop()
