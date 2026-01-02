@@ -1,0 +1,45 @@
+{
+    "port": "8282",
+    "log_level": "debug",
+    "debrids": [
+        {
+            "name": "realdebrid",
+            "api_key": "3OD7IJCMQMDCY5RONRDSCGKWCA4JGOQJU3KJVVYUYET5WA7FBVKA",
+            "folder": "/mnt/torplex/zurg/__all__",
+            "download_uncached": true
+        },
+        {
+            "name": "torbox",
+            "api_key": "82e025a0-193a-4d67-ab3d-4cd935502ba9",
+            "folder": "/mnt/torplex/torbox",
+            "download_uncached": true
+        }
+    ],
+    "qbittorrent": {
+        "download_folder": "/data/media"
+    },
+    "arrs": [
+        {
+            "name": "sonarr",
+            "host": "http://sonarr:8989",
+            "token": "b50da35e35784b80a802eee4fac1d07c"
+        },
+        {
+            "name": "radarr",
+            "host": "http://radarr:7878",
+            "token": "094b3624fdb54527a7f2d6e460ecef89"
+        }
+    ],
+    "rclone": {
+        "enabled": false
+    },
+    "symlink": {
+        "enabled": true,
+        "source": "/mnt/torplex/zurg/__all__",
+        "destination": "/data/media"
+    },
+    "repair": {
+        "enabled": true,
+        "interval": "1h"
+    }
+}

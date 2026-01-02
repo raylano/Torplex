@@ -1,0 +1,40 @@
+#################################################################
+## Watchlistarr Configuration
+## Uncomment the lines you would like to configure
+#################################################################
+
+interval:
+  seconds: 60
+
+#################################################################
+## Sonarr Configuration (Regular TV Shows)
+#################################################################
+
+sonarr:
+  baseUrl: "http://sonarr:8989"
+  apikey: "b50da35e35784b80a802eee4fac1d07c"
+  qualityProfile: "HD - 720p/1080p"
+  rootFolder: "/data/media/shows"
+  seasonMonitoring: all
+  tags:
+    - watchlistarr
+
+#################################################################
+## Radarr Configuration (Regular Movies)
+#################################################################
+
+radarr:
+  baseUrl: "http://radarr:7878"
+  apikey: "094b3624fdb54527a7f2d6e460ecef89"
+  qualityProfile: "HD - 720p/1080p"
+  rootFolder: "/data/media/movies"
+  tags:
+    - watchlistarr
+
+#################################################################
+## Plex Configuration
+#################################################################
+
+plex:
+  token: "s34Tt9zWemQMRGzU9RB2"
+  skipfriendsync: false

@@ -1,9 +1,0 @@
-mount_path: /mnt/torbox
-plex_token: ''
-prowlarr_api_key: ''
-prowlarr_url: http://prowlarr:9696
-quality_profile: 1080p
-scan_interval: 15
-symlink_path: /mnt/media
-tmdb_api_key: ''
-torbox_api_key: ''
