@@ -228,7 +228,7 @@ services:
       - MOUNT_FOLDER=/mnt/torplex/torbox
       - MEDIA_MOVIES=/data/media/movies
       - MEDIA_SHOWS=/data/media/shows
-      - POLL_INTERVAL=30
+      - POLL_INTERVAL=300
       - LOG_LEVEL=INFO
       - SONARR_URL=http://sonarr:8989
       - SONARR_API_KEY=b50da35e35784b80a802eee4fac1d07c
