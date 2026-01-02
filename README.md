@@ -1,69 +1,189 @@
-# Torbox Plex Manager
+# Torplex v2
 
-This project is a self-hosted automation stack designed to manage your media library by integrating **Plex**, **Prowlarr**, and **Torbox**. It replaces solutions like Zurg/Riven with a lightweight, custom Python application.
+> 🎬 **Media Automation Platform** with Real-Debrid & Torbox support
 
-## Features
+Torplex is a self-hosted media automation system that integrates with debrid services to stream content through Plex. It features automatic content discovery, torrent scraping with quality preferences, and intelligent anime handling.
 
-*   **Plex Watchlist Sync**: Automatically fetches items from your Plex Watchlist.
-*   **Automated Search**: Uses **Prowlarr** to search for torrents.
-*   **Torbox Integration**:
-    *   Checks Torbox cache for instant availability.
-    *   Adds magnets to Torbox.
-    *   Mounts Torbox WebDAV via **Rclone**.
-*   **Smart Symlinking**: Automatically creates organized symlinks in `/mnt/media` (Movies, TV, Anime) pointing to the Rclone mount.
-*   **Web Interface**: A clean dashboard to view status, search TMDB, and manually request items.
-*   **Anime Support**: Preferentially selects "Dual-Audio" or "Dubbed" releases and organizes them into separate folders.
-*   **Plex Media Server**: Optional built-in Plex server integration.
+## ✨ Features
 
-## Quick Start
+- **Dual Debrid Support**: Real-Debrid and Torbox with automatic fallback
+- **Plex Watchlist Sync**: Automatically process items from your Plex Watchlist
+- **Smart Scraping**: Torrentio + Prowlarr integration
+- **Anime Preferences**: Prioritizes Dual-Audio and Dubbed releases
+- **Quality Ranking**: Intelligent torrent selection based on resolution, codec, and source
+- **Modern UI**: Beautiful dashboard with TMDB metadata and posters
+- **State Machine**: Robust processing pipeline with retry logic
 
-The easiest way to get started is using the included setup script.
+## 🏗️ Architecture
 
-1.  **Clone the Repository**:
-    ```bash
-    git clone <repo_url>
-    cd <repo_folder>
-    ```
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Frontend (Next.js)                    │
+│  Dashboard │ Library │ Search │ Settings                     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Backend (FastAPI)                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│  │  TMDB    │  │ Scrapers │  │ Debrid   │  │ Symlink  │    │
+│  │ Service  │  │Torrentio │  │ RD + TB  │  │ Manager  │    │
+│  └──────────┘  │ Prowlarr │  └──────────┘  └──────────┘    │
+│                └──────────┘                                  │
+│                       State Machine + Scheduler              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Storage Layer                             │
+│  PostgreSQL │ Zurg (WebDAV) │ Rclone (FUSE) │ Symlinks      │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                         Plex Media Server
+```
 
-2.  **Run Setup**:
-    ```bash
-    ./setup.sh
-    ```
-    This script will:
-    *   Create necessary directories.
-    *   Ask for your API keys (Torbox, TMDB, Plex, Prowlarr).
-    *   Configure Rclone for Torbox WebDAV (automatically obfuscating your password).
-    *   Ask if you want to install/run the Plex Media Server container.
-    *   Start the stack.
+## 🚀 Quick Start
 
-3.  **Access the UI**:
-    *   **Manager Dashboard**: `http://<your-ip>:8000`
-    *   **Prowlarr**: `http://<your-ip>:9696` (Configure indexers here first!)
-    *   **Plex**: `http://<your-ip>:32400/web` (If enabled)
+### Prerequisites
 
-## Manual Configuration (Advanced)
+- Docker & Docker Compose
+- Linux server with FUSE support
+- Real-Debrid and/or Torbox subscription
+- TMDB API key
 
-If you prefer not to use the script, you can manually configure the stack.
+### 1. Clone and Configure
 
-1.  **Directories**: Create `config/rclone`, `data`, `media` folders.
-2.  **Rclone**: Create `config/rclone/rclone.conf` with your Torbox WebDAV details.
-3.  **App Config**: The app generates `config/config.yaml` on first run. Edit it to add your API keys.
-4.  **Docker**: Run `docker-compose up -d`. Use `--profile plex` to include Plex.
+```bash
+git clone <repository>
+cd Torplex
 
-## Workflow
+# Copy and edit environment file
+cp .env.example .env
+nano .env
+```
 
-1.  **Request**: Add a movie/show to your **Plex Watchlist** OR search and request via the **Web UI**.
-2.  **Search**: The system detects the new item, checks if it's Anime, and searches Prowlarr.
-3.  **Cache/Download**: It adds the best magnet to Torbox (preferring cached).
-4.  **Symlink**: Once ready, it symlinks the file to:
-    *   `/media/movies`
-    *   `/media/tvshows`
-    *   `/media/animemovies`
-    *   `/media/animeshows`
-5.  **Watch**: Plex scans the `/data/media` folder.
+Add your API keys:
+```env
+REAL_DEBRID_TOKEN=your_token_here
+TORBOX_API_KEY=your_key_here
+TMDB_API_KEY=your_tmdb_key
+```
 
-## Troubleshooting
+### 2. Prepare Host (Linux)
 
-*   **Logs**: `docker-compose logs -f app`
-*   **Startup Crash**: Ensure `config/rclone/rclone.conf` exists.
-*   **Prowlarr**: Ensure you have added indexers (like Torrentio) in Prowlarr and synced the API key.
+```bash
+# Enable FUSE for non-root users
+sudo sh -c 'echo "user_allow_other" >> /etc/fuse.conf'
+
+# Create mount directory
+sudo mkdir -p /mnt/torplex
+sudo mount --bind /mnt/torplex /mnt/torplex
+sudo mount --make-shared /mnt/torplex
+```
+
+### 3. Start the Stack
+
+```bash
+docker-compose up -d
+
+# Watch logs
+docker-compose logs -f
+```
+
+### 4. Access
+
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+- **Prowlarr**: http://localhost:9696
+
+## 📁 Project Structure
+
+```
+Torplex/
+├── backend/              # FastAPI Python backend
+│   ├── src/
+│   │   ├── main.py       # Application entry
+│   │   ├── config.py     # Settings management
+│   │   ├── database.py   # SQLAlchemy setup
+│   │   ├── models/       # Database models
+│   │   ├── services/     # Business logic
+│   │   ├── core/         # State machine, scheduler
+│   │   └── routers/      # API endpoints
+│   └── Dockerfile
+│
+├── frontend/             # Next.js frontend
+│   ├── src/
+│   │   ├── app/          # Pages
+│   │   ├── components/   # React components
+│   │   └── lib/          # API client
+│   └── Dockerfile
+│
+├── config/               # Service configurations
+│   ├── zurg/             # Zurg config
+│   └── rclone/           # Rclone config
+│
+└── docker-compose.yml    # Orchestration
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `REAL_DEBRID_TOKEN` | Real-Debrid API token | Recommended |
+| `TORBOX_API_KEY` | Torbox API key | Optional |
+| `TMDB_API_KEY` | TMDB API key for metadata | Yes |
+| `PLEX_TOKEN` | Plex token for watchlist sync | Optional |
+| `PROWLARR_API_KEY` | Prowlarr API key | Optional |
+
+### Anime Preferences
+
+The quality ranker automatically detects anime and applies special scoring:
+1. **Cached + Dual-Audio**: Highest priority
+2. **Cached + Dubbed**: Second priority
+3. **Dual-Audio** (non-cached)
+4. **Dubbed** (non-cached)
+5. **Cached** (any audio)
+6. **Best quality** (non-cached)
+
+## 🔄 Processing Pipeline
+
+```
+REQUESTED → INDEXED → SCRAPED → DOWNLOADED → SYMLINKED → COMPLETED
+    │           │          │          │            │           │
+    ▼           ▼          ▼          ▼            ▼           ▼
+  Added     Metadata   Torrents    Added to    Symlink     Plex
+  to queue   from      found &     debrid      created     refreshed
+            TMDB       ranked      service
+```
+
+## 🛠️ Development
+
+### Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn src.main:app --reload
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## 📝 License
+
+MIT License - see LICENSE file for details.
+
+## 🙏 Credits
+
+- Inspired by [Riven](https://github.com/rivenmedia/riven)
+- Uses [Torrentio](https://torrentio.strem.fun) for stream discovery
+- TMDB for metadata

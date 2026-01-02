@@ -1,0 +1,195 @@
+services:
+  # ============================================================================
+  # DATABASE
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: torplex_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: torplex
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: torplex
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # ZURG - Real-Debrid WebDAV Gateway
+  # ============================================================================
+  zurg:
+    image: ghcr.io/debridmediamanager/zurg-testing:latest
+    container_name: torplex_zurg
+    restart: unless-stopped
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./config/zurg/config.yml:/app/config.yml
+      - ./data/zurg:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9999/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # RCLONE - FUSE Mount Provider
+  # ============================================================================
+  rclone:
+    image: rclone/rclone:latest
+    container_name: torplex_rclone
+    restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - RCLONE_CONFIG_TORBOX_USER=sir.re4per@gmail.com
+    volumes:
+      - ./config/rclone:/config/rclone
+      - /mnt/torplex:/data:rshared
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting 60 seconds for Zurg to initialize..."
+        sleep 60
+        
+        # Configure Torbox Password (obscured)
+        if [ -n "$TORBOX_API_KEY" ]; then
+            echo "Configuring Torbox authentication..."
+            export RCLONE_CONFIG_TORBOX_PASS=$(rclone obscure "$TORBOX_API_KEY")
+        fi
+
+        echo "Starting rclone mount (Combined Zurg + Torbox)..."
+        rclone mount combined: /data \
+          --allow-other \
+          --allow-non-empty \
+          --vfs-cache-mode full \
+          --vfs-cache-max-size 50G \
+          --vfs-read-ahead 128M \
+          --dir-cache-time 1000h \
+          --buffer-size 32M \
+          --log-level INFO
+    depends_on:
+      - zurg
+    networks:
+      - torplex_net
+
+
+  # ============================================================================
+  # BACKEND - FastAPI Application
+  # ============================================================================
+  backend:
+    build: ./backend
+    container_name: torplex_backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://torplex:${DB_PASSWORD}@postgres:5432/torplex
+      - REAL_DEBRID_TOKEN=${REAL_DEBRID_TOKEN}
+      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      - PLEX_URL=${PLEX_URL}
+      - PROWLARR_URL=${PROWLARR_URL}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY}
+      - MOUNT_PATH=/mnt/zurg
+      - SYMLINK_PATH=/mnt/media
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - /mnt/torplex:/mnt/zurg:rslave  # Required for symlink resolution
+      - ./data/media:/mnt/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rclone:
+        condition: service_started
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # FRONTEND - Next.js Application
+  # ============================================================================
+  frontend:
+    build: ./frontend
+    container_name: torplex_frontend
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=  # Empty = use relative paths, works with any host
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # PROWLARR - Indexer Manager
+  # ============================================================================
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: torplex_prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "9696:9696"
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # FLARESOLVERR - Cloudflare Bypass (for Prowlarr)
+  # ============================================================================
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: torplex_flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+    ports:
+      - "8191:8191"
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # PLEX - Media Server
+  # ============================================================================
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: torplex_plex
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+      - VERSION=docker
+      - PLEX_CLAIM=${PLEX_CLAIM:-}
+    volumes:
+      - ./config/plex:/config
+      - ./data/media:/data/media:rslave
+      - /mnt/torplex:/mnt/zurg:rslave  # Required for symlink resolution  # Required for symlink resolution
+
+networks:
+  torplex_net:
+    driver: bridge

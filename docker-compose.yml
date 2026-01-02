@@ -1,84 +1,409 @@
 services:
-  # The Brain: Our Python Application
-  app:
-    build: .
-    container_name: torplex_torbox_plex_manager
+  # ============================================================================
+  # DATABASE (kept for potential future use)
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: torplex_db
     restart: unless-stopped
-    volumes:
-      - ./config:/config
-      - ./data:/data
-      # Mount the rclone share so the app can see the files
-      - /mnt/torbox:/mnt/torbox:shared
-      # Mount the media folder where symlinks will be created
-      - ./media:/mnt/media
     environment:
-      - CONFIG_PATH=/config
-      - DATA_PATH=/data
-      - MOUNT_PATH=/mnt/torbox
-      - SYMLINK_PATH=/mnt/media
-      - PUID=1000
-      - PGID=1000
-    ports:
-      - "8000:8000"
-    depends_on:
-      - rclone
-    profiles: ["core", "plex"]
+      POSTGRES_USER: torplex
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: torplex
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torplex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - torplex_net
 
-  # Rclone: Mounts Torbox WebDAV
+  # ============================================================================
+  # ZURG - Real-Debrid WebDAV Gateway
+  # ============================================================================
+  zurg:
+    image: ghcr.io/debridmediamanager/zurg-testing:latest
+    container_name: torplex_zurg
+    restart: unless-stopped
+    environment:
+      - REAL_DEBRID_TOKEN=${REAL_DEBRID_TOKEN}
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./config/zurg/config.yml:/app/config.yml
+      - ./data/zurg:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9999/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # RCLONE - FUSE Mount Provider (Combined Zurg + TorBox)
+  # ============================================================================
   rclone:
     image: rclone/rclone:latest
     container_name: torplex_rclone
     restart: unless-stopped
     privileged: true
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - RCLONE_CONFIG_TORBOX_USER=${TORBOX_EMAIL}
     volumes:
       - ./config/rclone:/config/rclone
-      - /mnt/torbox:/mnt/torbox:shared
-    command: "mount torbox: /mnt/torbox --allow-other --dir-cache-time 10s --vfs-cache-mode full"
-    profiles: ["core", "plex"]
+      - /mnt/torplex:/data:rshared
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting 60 seconds for Zurg to initialize..."
+        sleep 60
+        
+        # Note: TorBox credentials are already configured in rclone.conf
 
-  # Prowlarr: Indexer Manager
+        # Create mount directories
+        mkdir -p /data/zurg /data/torbox
+
+        echo "Starting Zurg mount..."
+        rclone mount zurg: /data/zurg \
+          --allow-other \
+          --allow-non-empty \
+          --links \
+          --vfs-cache-mode writes \
+          --vfs-cache-max-size 50G \
+          --vfs-read-ahead 128M \
+          --dir-cache-time 10m \
+          --buffer-size 32M \
+          --log-level INFO &
+
+        sleep 5
+
+        echo "Starting TorBox mount..."
+        rclone mount torbox: /data/torbox \
+          --allow-other \
+          --allow-non-empty \
+          --links \
+          --vfs-cache-mode writes \
+          --vfs-cache-max-size 50G \
+          --vfs-read-ahead 128M \
+          --dir-cache-time 10m \
+          --buffer-size 32M \
+          --log-level INFO &
+
+        # Keep container running
+        wait
+    depends_on:
+      - zurg
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # PROWLARR - Indexer Manager (Torrents + Usenet)
+  # ============================================================================
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: torplex_prowlarr
+    restart: unless-stopped
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Etc/UTC
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
     volumes:
       - ./config/prowlarr:/config
     ports:
       - "9696:9696"
-    restart: unless-stopped
-    profiles: ["core", "plex"]
+    networks:
+      - torplex_net
 
-  # Flaresolverr: Often needed for Prowlarr to bypass Cloudflare
+  # ============================================================================
+  # FLARESOLVERR - Cloudflare Bypass (for Prowlarr)
+  # ============================================================================
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: torplex_flaresolverr
+    restart: unless-stopped
     environment:
       - LOG_LEVEL=info
     ports:
       - "8191:8191"
-    restart: unless-stopped
-    profiles: ["core", "plex"]
+    networks:
+      - torplex_net
 
-  # Plex Media Server (Optional)
+  # ============================================================================
+  # SONARR - TV Series Management
+  # ============================================================================
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: torplex_sonarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/sonarr:/config
+      - ./data/media:/data/media
+      - ./data/nzb_watch:/data/nzb_watch
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "8989:8989"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # RADARR - Movie Management
+  # ============================================================================
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: torplex_radarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/radarr:/config
+      - ./data/media:/data/media
+      - ./data/nzb_watch:/data/nzb_watch
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "7878:7878"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # DECYPHARR - Debrid Download Client + Symlink Creator
+  # Emulates qBittorrent API for Sonarr/Radarr integration
+  # https://github.com/sirrobot01/decypharr
+  # ============================================================================
+  decypharr:
+    image: cy01/blackhole:beta
+    container_name: torplex_decypharr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/decypharr:/app
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/torplex:rslave
+    ports:
+      - "8282:8282"
+    depends_on:
+      - rclone
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # NZB-BLACKHOLE - TorBox Usenet Uploader
+  # Watches folder for NZB files and uploads to TorBox for usenet download
+  # ============================================================================
+  nzb-blackhole:
+    build: ./nzb-blackhole
+    container_name: torplex_nzb_blackhole
+    restart: unless-stopped
+    environment:
+      - TORBOX_API_KEY=${TORBOX_API_KEY}
+      - NZB_WATCH_FOLDER=/data/nzb_watch
+      - POLL_INTERVAL=10
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data/nzb_watch:/data/nzb_watch
+      - /mnt/torplex:/mnt/torplex:ro
+    depends_on:
+      - rclone
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # WATCHLISTARR - Plex Watchlist to Sonarr/Radarr Sync
+  # https://github.com/nylonee/watchlistarr
+  # NOTE: Only syncs to regular Sonarr/Radarr - use Jellyseerr for anime routing
+  # ============================================================================
+  watchlistarr:
+    image: nylonee/watchlistarr:latest
+    container_name: torplex_watchlistarr
+    restart: unless-stopped
+    environment:
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - SONARR_BASE_URL=http://sonarr:8989
+      - SONARR_QUALITY_PROFILE=HD - 720p/1080p
+      - SONARR_ROOT_FOLDER=/data/media/shows
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - RADARR_BASE_URL=http://radarr:7878
+      - RADARR_QUALITY_PROFILE=HD - 720p/1080p
+      - RADARR_ROOT_FOLDER=/data/media/movies
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      - REFRESH_INTERVAL_SECONDS=60
+    volumes:
+      - ./config/watchlistarr:/app/config
+    depends_on:
+      - sonarr
+      - radarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # SONARR ANIME - Anime TV Series Management
+  # Separate instance for anime with dual-audio preferences
+  # ============================================================================
+  sonarr-anime:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: torplex_sonarr_anime
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/sonarr-anime:/config
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "8990:8989"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # RADARR ANIME - Anime Movie Management
+  # Separate instance for anime movies with dual-audio preferences
+  # ============================================================================
+  radarr-anime:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: torplex_radarr_anime
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/radarr-anime:/config
+      - ./data/media:/data/media
+      - /mnt/torplex:/mnt/debrid:ro
+    ports:
+      - "7879:7878"
+    depends_on:
+      - rclone
+      - prowlarr
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # JELLYSEERR - Request Management & Media Discovery
+  # Use this for adding content - it can route anime to anime instances!
+  # ============================================================================
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: torplex_jellyseerr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config/jellyseerr:/app/config
+    ports:
+      - "5055:5055"
+    depends_on:
+      - sonarr
+      - radarr
+      - sonarr-anime
+      - radarr-anime
+    networks:
+      - torplex_net
+
+  # ============================================================================
+  # PLEX - Media Server
+  # ============================================================================
   plex:
     image: lscr.io/linuxserver/plex:latest
     container_name: torplex_plex
+    restart: unless-stopped
     network_mode: host
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Etc/UTC
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Amsterdam}
       - VERSION=docker
-      - PLEX_CLAIM=${PLEX_CLAIM}
+      - PLEX_CLAIM=${PLEX_CLAIM:-}
     volumes:
-      - ./plex/config:/config
-      - ./plex/transcode:/transcode
-      - ./media:/data/media
-    restart: unless-stopped
-    profiles: ["plex"]
-    # devices:
-    #   - /dev/dri:/dev/dri # Intel QuickSync
-    #   - /dev/nvidia0:/dev/nvidia0 # Nvidia (requires nvidia-container-toolkit)
+      - ./config/plex:/config
+      - ./data/media:/data/media:rslave
+      - /mnt/torplex:/mnt/debrid:rslave
+
+  # ============================================================================
+  # TORPLEX BACKEND - (DISABLED - arr-stack takes over)
+  # Uncomment to re-enable custom Torplex backend
+  # ============================================================================
+  # backend:
+  #   build: ./backend
+  #   container_name: torplex_backend
+  #   restart: unless-stopped
+  #   environment:
+  #     - DATABASE_URL=postgresql+asyncpg://torplex:${DB_PASSWORD}@postgres:5432/torplex
+  #     - REAL_DEBRID_TOKEN=${REAL_DEBRID_TOKEN}
+  #     - TORBOX_API_KEY=${TORBOX_API_KEY}
+  #     - TMDB_API_KEY=${TMDB_API_KEY}
+  #     - PLEX_TOKEN=${PLEX_TOKEN}
+  #     - PLEX_URL=${PLEX_URL}
+  #     - PROWLARR_URL=${PROWLARR_URL}
+  #     - PROWLARR_API_KEY=${PROWLARR_API_KEY}
+  #     - MOUNT_PATH=/mnt/zurg
+  #     - SYMLINK_PATH=/mnt/media
+  #     - TZ=${TZ:-Europe/Amsterdam}
+  #   volumes:
+  #     - /mnt/torplex:/mnt/zurg:rslave
+  #     - ./data/media:/mnt/media
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     # rclone:
+  #     #   condition: service_started
+  #   networks:
+  #     - torplex_net
+
+  # ============================================================================
+  # TORPLEX FRONTEND - (DISABLED - Jellyseerr takes over)
+  # Uncomment to re-enable custom Torplex frontend
+  # ============================================================================
+  # frontend:
+  #   build: ./frontend
+  #   container_name: torplex_frontend
+  #   restart: unless-stopped
+  #   environment:
+  #     - NEXT_PUBLIC_API_URL=
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - torplex_net
+
+networks:
+  torplex_net:
+    driver: bridge
