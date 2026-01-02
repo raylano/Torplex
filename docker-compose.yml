@@ -223,7 +223,7 @@ services:
     container_name: torplex_nzb_blackhole
     restart: unless-stopped
     environment:
-      - TORBOX_API_KEY=fbce2a63-f045-4cf7-87ac-cae287e0dccf
+      - TORBOX_API_KEY=82e025a0-193a-4d67-ab3d-4cd935502ba9
       - NZB_WATCH_FOLDER=/data/nzb_watch
       - MOUNT_FOLDER=/mnt/torplex/torbox
       - MEDIA_MOVIES=/data/media/movies
