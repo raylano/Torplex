@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-TorBox Usenet Automator V4 - Full Integration
+TorBox Usenet Automator V6 - Smart Matching & Batch Notifications
 - Scans TorBox history for COMPLETED items
-- Creates symlinks in proper media folders
-- Notifies Sonarr/Radarr when downloads complete
-- Handles API Rate Limits intelligently
+- Smart file matching (handles release name variations)
+- Uses Sonarr/Radarr API for correct folder paths
+- Batch notifications (1x per poll, not per symlink)
+- Proper wait times between uploads and polling
 """
 
 import os
@@ -169,18 +170,58 @@ def upload_nzb(nzb_path: Path):
     return False
 
 def find_file_in_mount(filename_part: str) -> Path:
-    """Recursively search for file in mount."""
+    """Recursively search for file in mount (legacy - use smart version)."""
     try:
         if not MOUNT_FOLDER.exists(): return None
         search_term = filename_part.lower()
         
-        # Strategy 1: Glob match
         for f in MOUNT_FOLDER.rglob("*"):
              if f.is_file():
                  if search_term in f.name.lower():
                      if "sample" not in f.name.lower() and f.stat().st_size > 50 * 1024 * 1024:
                          return f
     except Exception: pass
+    return None
+
+def find_file_smart(name: str) -> Path:
+    """Smart file matching - matches on show name + S##E## only.
+    
+    Handles cases like:
+    TorBox name: Dokter.Tinus.S02E02.DUTCH.1080p.WEB.h264-APESTAARTJE-FTP
+    Actual file: dokter.tinus.s02e02.dutch.1080p.web.h264-apestaartje.mkv
+    """
+    try:
+        if not MOUNT_FOLDER.exists(): return None
+        
+        # Extract show name and S##E## pattern
+        match = re.search(r'^(.+?)[.\s]([Ss]\d{1,2}[Ee]\d{1,3})', name)
+        if match:
+            show_part = match.group(1).lower().replace('.', '').replace(' ', '').replace('-', '')
+            episode_part = match.group(2).lower()  # e.g. "s02e02"
+            
+            for f in MOUNT_FOLDER.rglob("*"):
+                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi', '.ts']:
+                    fname = f.name.lower().replace('.', '').replace(' ', '').replace('-', '')
+                    # Match normalized show name AND episode number
+                    if show_part in fname and episode_part in f.name.lower():
+                        if "sample" not in f.name.lower() and f.stat().st_size > 50 * 1024 * 1024:
+                            return f
+        
+        # Fallback: try year-based matching for movies
+        year_match = re.search(r'^(.+?)[.\s](\d{4})', name)
+        if year_match:
+            title_part = year_match.group(1).lower().replace('.', '').replace(' ', '').replace('-', '')
+            year = year_match.group(2)
+            
+            for f in MOUNT_FOLDER.rglob("*"):
+                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi', '.ts']:
+                    fname = f.name.lower().replace('.', '').replace(' ', '').replace('-', '')
+                    if title_part in fname and year in f.name:
+                        if "sample" not in f.name.lower() and f.stat().st_size > 50 * 1024 * 1024:
+                            return f
+                            
+    except Exception as e:
+        logger.debug(f"Smart file search error: {e}")
     return None
 
 def find_folder_in_mount(name: str) -> Path:
@@ -200,6 +241,66 @@ def find_folder_in_mount(name: str) -> Path:
                 return d
     except Exception:
         pass
+    return None
+
+# Sonarr/Radarr folder lookup cache
+_sonarr_series_cache = None
+_radarr_movie_cache = None
+_cache_time = 0
+CACHE_DURATION = 300  # 5 minutes
+
+def get_sonarr_series_path(series_name: str) -> str:
+    """Query Sonarr to get the correct series folder path."""
+    global _sonarr_series_cache, _cache_time
+    
+    if not SONARR_URL or not SONARR_API_KEY:
+        return None
+    
+    try:
+        # Refresh cache if expired
+        if _sonarr_series_cache is None or (time.time() - _cache_time) > CACHE_DURATION:
+            headers = {"X-Api-Key": SONARR_API_KEY}
+            resp = requests.get(f"{SONARR_URL}/api/v3/series", headers=headers, timeout=30)
+            if resp.status_code == 200:
+                _sonarr_series_cache = resp.json()
+                _cache_time = time.time()
+                logger.debug(f"Refreshed Sonarr cache: {len(_sonarr_series_cache)} series")
+        
+        if _sonarr_series_cache:
+            search = series_name.lower().replace('.', ' ').replace('-', ' ')
+            for series in _sonarr_series_cache:
+                title = series.get('title', '').lower()
+                if search in title or title in search:
+                    return series.get('path')
+    except Exception as e:
+        logger.debug(f"Sonarr lookup failed: {e}")
+    return None
+
+def get_radarr_movie_path(movie_name: str) -> str:
+    """Query Radarr to get the correct movie folder path."""
+    global _radarr_movie_cache, _cache_time
+    
+    if not RADARR_URL or not RADARR_API_KEY:
+        return None
+    
+    try:
+        # Refresh cache if expired
+        if _radarr_movie_cache is None or (time.time() - _cache_time) > CACHE_DURATION:
+            headers = {"X-Api-Key": RADARR_API_KEY}
+            resp = requests.get(f"{RADARR_URL}/api/v3/movie", headers=headers, timeout=30)
+            if resp.status_code == 200:
+                _radarr_movie_cache = resp.json()
+                _cache_time = time.time()
+                logger.debug(f"Refreshed Radarr cache: {len(_radarr_movie_cache)} movies")
+        
+        if _radarr_movie_cache:
+            search = movie_name.lower().replace('.', ' ').replace('-', ' ')
+            for movie in _radarr_movie_cache:
+                title = movie.get('title', '').lower()
+                if search in title or title in search:
+                    return movie.get('path')
+    except Exception as e:
+        logger.debug(f"Radarr lookup failed: {e}")
     return None
 
 def create_symlink(source: Path, dest: Path) -> bool:
@@ -266,7 +367,11 @@ def check_mount_health():
         logger.error(f"Mount check failed: {e}")
 
 def process_history():
-    """Scan TorBox history and process COMPLETED items."""
+    """Scan TorBox history and process COMPLETED items with batch notifications."""
+    notify_sonarr_flag = False
+    notify_radarr_flag = False
+    symlinks_created = 0
+    
     try:
         headers = {"Authorization": f"Bearer {TORBOX_API_KEY}"}
         resp = requests.get(USENET_LIST_URL, headers=headers, params={'bypass_cache': 'true'}, timeout=30)
@@ -296,50 +401,68 @@ def process_history():
                 # Determine if TV or Movie
                 is_show = is_tv_show(name)
                 
-                # Find folder/file in mount
+                # Find folder/file in mount - try smart matching first
                 found_folder = find_folder_in_mount(name)
-                found_path = find_file_in_mount(name) if not found_folder else None
+                found_path = None
+                if not found_folder:
+                    found_path = find_file_smart(name)  # V6: Smart matching
+                    if not found_path:
+                        found_path = find_file_in_mount(name)  # Fallback
                 
                 if found_folder or found_path:
-                    source = found_folder or found_path.parent
-                    
                     # Create symlink in appropriate media folder
                     if is_show:
                         show_name, _ = extract_show_info(name)
-                        dest_folder = MEDIA_SHOWS / show_name
+                        
+                        # V6: Try to get correct path from Sonarr
+                        sonarr_path = get_sonarr_series_path(show_name)
+                        if sonarr_path:
+                            dest_folder = Path(sonarr_path)
+                        else:
+                            dest_folder = MEDIA_SHOWS / show_name
                         
                         # Symlink all files in the folder
                         if found_folder:
                             for f in found_folder.rglob("*"):
-                                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi']:
+                                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi', '.ts']:
                                     dest_file = dest_folder / f.name
                                     if create_symlink(f, dest_file):
                                         logger.info(f"SHOW SYMLINK: {dest_file}")
+                                        symlinks_created += 1
                         else:
                             dest_file = dest_folder / found_path.name
                             if create_symlink(found_path, dest_file):
                                 logger.info(f"SHOW SYMLINK: {dest_file}")
+                                symlinks_created += 1
                         
-                        notify_sonarr(show_name)
+                        notify_sonarr_flag = True  # V6: Batch notification
                     else:
                         movie_name = extract_movie_info(name)
-                        dest_folder = MEDIA_MOVIES / movie_name
+                        
+                        # V6: Try to get correct path from Radarr
+                        radarr_path = get_radarr_movie_path(movie_name)
+                        if radarr_path:
+                            dest_folder = Path(radarr_path)
+                        else:
+                            dest_folder = MEDIA_MOVIES / movie_name
                         
                         # Symlink main file
                         if found_folder:
                             for f in found_folder.rglob("*"):
-                                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi']:
+                                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi', '.ts']:
                                     if "sample" not in f.name.lower():
                                         dest_file = dest_folder / f.name
                                         if create_symlink(f, dest_file):
                                             logger.info(f"MOVIE SYMLINK: {dest_file}")
+                                            symlinks_created += 1
                                         break  # Only first main file
                         else:
                             dest_file = dest_folder / found_path.name
                             if create_symlink(found_path, dest_file):
                                 logger.info(f"MOVIE SYMLINK: {dest_file}")
+                                symlinks_created += 1
                         
-                        notify_radarr(movie_name)
+                        notify_radarr_flag = True  # V6: Batch notification
                     
                     processed_ids.add(tb_id)
                     save_history()
@@ -351,6 +474,15 @@ def process_history():
                     logger.warning(f"Item failed in TorBox: {name}. Ignoring.")
                     processed_ids.add(tb_id)
                     save_history()
+        
+        # V6: Batch notifications at end of poll cycle
+        if notify_sonarr_flag:
+            notify_sonarr("batch")
+        if notify_radarr_flag:
+            notify_radarr("batch")
+        
+        if symlinks_created > 0:
+            logger.info(f"Created {symlinks_created} symlinks this poll cycle.")
 
     except Exception as e:
         logger.error(f"Process Loop Error: {e}")
@@ -366,7 +498,7 @@ class NZBHandler(FileSystemEventHandler):
                 except: pass
 
 def main():
-    logger.info("Starting TorBox Usenet Automator V5 (Interleaved Processing)...")
+    logger.info("Starting TorBox Usenet Automator V6 (Smart Matching & Batch Notify)...")
     logger.info(f"Mount folder: {MOUNT_FOLDER}")
     logger.info(f"Media movies: {MEDIA_MOVIES}")
     logger.info(f"Media shows: {MEDIA_SHOWS}")
@@ -388,7 +520,8 @@ def main():
             
             if nzbs:
                 batch_size = 5
-                batch_wait = 600  # 10 minutes between batches
+                pre_poll_wait = 300   # V6: 5 minutes after upload before polling
+                batch_wait = 600      # 10 minutes between batches
                 
                 # Process up to batch_size NZBs
                 uploaded_count = 0
@@ -404,6 +537,11 @@ def main():
                     logger.info(f"Uploaded {uploaded_count} NZBs. {remaining} remaining in queue.")
                 else:
                     logger.info(f"Uploaded {uploaded_count} NZBs. Queue empty.")
+                
+                # V6: Wait before polling to allow downloads to complete
+                if uploaded_count > 0:
+                    logger.info(f"Waiting {pre_poll_wait}s for downloads to complete...")
+                    time.sleep(pre_poll_wait)
                 
                 # Poll for completed downloads and create symlinks
                 logger.info("Polling for completed downloads...")
