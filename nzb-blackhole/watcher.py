@@ -57,6 +57,9 @@ logger = logging.getLogger(__name__)
 # Track processed IDs
 processed_ids = set()
 
+# Track failed upload attempts per NZB (to move to failed after X retries)
+upload_retry_count = {}
+
 # TV Show patterns
 TV_PATTERNS = [
     r'[Ss]\d{1,2}[Ee]\d{1,2}',  # S01E01
@@ -129,11 +132,15 @@ def move_to_failed(nzb_path: Path):
         logger.error(f"Could not move failed NZB: {e}")
 
 def upload_nzb(nzb_path: Path):
-    """Upload NZB to TorBox."""
+    """Upload NZB to TorBox with retry tracking."""
+    global upload_retry_count
     if not TORBOX_API_KEY: return False
     
-    max_retries = 3
-    for attempt in range(max_retries):
+    nzb_name = nzb_path.name
+    max_retries_per_session = 3  # Retries within this upload call
+    max_total_failures = 3       # Total failures across multiple cycles before moving to failed
+    
+    for attempt in range(max_retries_per_session):
         try:
             headers = {"Authorization": f"Bearer {TORBOX_API_KEY}"}
             with open(nzb_path, 'rb') as f:
@@ -146,24 +153,59 @@ def upload_nzb(nzb_path: Path):
                     data = resp.json()
                     if data.get('success'):
                         logger.info(f"Upload SUCCESS: {nzb_path.name}")
+                        # Clear retry count on success
+                        if nzb_name in upload_retry_count:
+                            del upload_retry_count[nzb_name]
                         time.sleep(2)
                         return True
                     else:
                         detail = data.get('detail', '')
+                        error_type = data.get('error', '')
                         logger.error(f"API Error: {detail}")
-                        if "limit" in detail.lower():
-                             logger.warning("Rate limit hit. Sleeping 60s.")
-                             time.sleep(60)
+                        
+                        # Handle specific error types
+                        if error_type == 'UNKNOWN_ERROR':
+                            # TorBox bug - move to failed immediately
+                            logger.warning(f"TorBox API bug detected. Moving to failed: {nzb_name}")
+                            move_to_failed(nzb_path)
+                            return False
+                        elif error_type == 'ACTIVE_LIMIT':
+                            # At download limit - don't count as failure, just skip
+                            logger.warning("Active download limit reached. Will retry later.")
+                            return False
+                        elif "limit" in detail.lower():
+                            logger.warning("Rate limit hit. Sleeping 60s.")
+                            time.sleep(60)
+                        
+                        # Track failure
+                        upload_retry_count[nzb_name] = upload_retry_count.get(nzb_name, 0) + 1
+                        if upload_retry_count[nzb_name] >= max_total_failures:
+                            logger.error(f"Max failures ({max_total_failures}) reached for {nzb_name}. Moving to failed.")
+                            move_to_failed(nzb_path)
+                            del upload_retry_count[nzb_name]
                         return False
+                        
                 elif resp.status_code == 429:
                     logger.warning(f"RATE LIMIT (429). Pausing for 60 seconds...")
                     time.sleep(60)
                     continue 
                 else:
                     logger.error(f"HTTP Error {resp.status_code}: {resp.text}")
+                    # Track failure for HTTP errors
+                    upload_retry_count[nzb_name] = upload_retry_count.get(nzb_name, 0) + 1
+                    if upload_retry_count[nzb_name] >= max_total_failures:
+                        logger.error(f"Max failures ({max_total_failures}) reached for {nzb_name}. Moving to failed.")
+                        move_to_failed(nzb_path)
+                        del upload_retry_count[nzb_name]
                     return False
+                    
         except Exception as e:
             logger.error(f"Upload failed: {e}")
+            upload_retry_count[nzb_name] = upload_retry_count.get(nzb_name, 0) + 1
+            if upload_retry_count[nzb_name] >= max_total_failures:
+                logger.error(f"Max failures ({max_total_failures}) reached for {nzb_name}. Moving to failed.")
+                move_to_failed(nzb_path)
+                del upload_retry_count[nzb_name]
             return False
             
     move_to_failed(nzb_path)
