@@ -27,6 +27,7 @@ MOUNT_FOLDER = Path(os.environ.get('MOUNT_FOLDER', '/mnt/torplex/torbox'))
 MEDIA_MOVIES = Path(os.environ.get('MEDIA_MOVIES', '/data/media/movies'))
 MEDIA_SHOWS = Path(os.environ.get('MEDIA_SHOWS', '/data/media/shows'))
 POLL_INTERVAL = int(os.environ.get('POLL_INTERVAL', '60'))
+UPLOAD_DELAY = int(os.environ.get('UPLOAD_DELAY', '8'))  # V7: 8 sec between uploads (10 req/min limit)
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
 # Sonarr/Radarr Configuration
@@ -155,7 +156,7 @@ def move_to_failed(nzb_path: Path):
         logger.error(f"Could not move failed NZB: {e}")
 
 def upload_nzb(nzb_path: Path):
-    """Upload NZB to TorBox with retry tracking."""
+    """Upload NZB to TorBox with retry tracking and queue support."""
     global upload_retry_count
     if not TORBOX_API_KEY: return False
     
@@ -168,22 +169,30 @@ def upload_nzb(nzb_path: Path):
             headers = {"Authorization": f"Bearer {TORBOX_API_KEY}"}
             with open(nzb_path, 'rb') as f:
                 files = {'file': (nzb_path.name, f, 'application/x-nzb')}
+                # V7: Add as_queued=true so downloads go to queue if limit reached
+                data = {'as_queued': 'true'}
                 logger.info(f"Uploading: {nzb_path.name} (Attempt {attempt+1})")
                 
-                resp = requests.post(USENET_CREATE_URL, headers=headers, files=files, timeout=60)
+                resp = requests.post(USENET_CREATE_URL, headers=headers, files=files, data=data, timeout=60)
                 
                 if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get('success'):
-                        logger.info(f"Upload SUCCESS: {nzb_path.name}")
+                    resp_data = resp.json()
+                    if resp_data.get('success'):
+                        # Check if queued or active
+                        download_data = resp_data.get('data', {})
+                        queued = download_data.get('queued', False)
+                        if queued:
+                            logger.info(f"Upload QUEUED: {nzb_path.name} (will start when slot available)")
+                        else:
+                            logger.info(f"Upload SUCCESS: {nzb_path.name}")
                         # Clear retry count on success
                         if nzb_name in upload_retry_count:
                             del upload_retry_count[nzb_name]
                         time.sleep(2)
                         return True
                     else:
-                        detail = data.get('detail', '')
-                        error_type = data.get('error', '')
+                        detail = resp_data.get('detail', '')
+                        error_type = resp_data.get('error', '')
                         logger.error(f"API Error: {detail}")
                         
                         # Handle specific error types
@@ -193,8 +202,8 @@ def upload_nzb(nzb_path: Path):
                             move_to_failed(nzb_path)
                             return False
                         elif error_type == 'ACTIVE_LIMIT':
-                            # At download limit - don't count as failure, just skip
-                            logger.warning("Active download limit reached. Will retry later.")
+                            # With as_queued=true this shouldn't happen, but handle just in case
+                            logger.warning("Active limit reached even with queue. Will retry later.")
                             return False
                         elif "limit" in detail.lower():
                             logger.warning("Rate limit hit. Sleeping 60s.")
@@ -212,6 +221,25 @@ def upload_nzb(nzb_path: Path):
                     logger.warning(f"RATE LIMIT (429). Pausing for 60 seconds...")
                     time.sleep(60)
                     continue 
+                elif resp.status_code == 500:
+                    # V7: Handle ACTIVE_LIMIT from 500 response - don't count as failure
+                    try:
+                        error_data = resp.json()
+                        error_type = error_data.get('error', '')
+                        if error_type == 'ACTIVE_LIMIT':
+                            logger.warning(f"Active limit reached. NZB will retry next cycle: {nzb_name}")
+                            return False  # Don't count as failure, will retry
+                        else:
+                            logger.error(f"HTTP 500 Error: {error_data.get('detail', resp.text)}")
+                    except:
+                        logger.error(f"HTTP Error 500: {resp.text}")
+                    # Track failure for other 500 errors
+                    upload_retry_count[nzb_name] = upload_retry_count.get(nzb_name, 0) + 1
+                    if upload_retry_count[nzb_name] >= max_total_failures:
+                        logger.error(f"Max failures ({max_total_failures}) reached for {nzb_name}. Moving to failed.")
+                        move_to_failed(nzb_path)
+                        del upload_retry_count[nzb_name]
+                    return False
                 else:
                     logger.error(f"HTTP Error {resp.status_code}: {resp.text}")
                     # Track failure for HTTP errors
@@ -690,8 +718,8 @@ def main():
             nzbs = list(NZB_DIR.glob("*.nzb"))
             
             if nzbs:
-                batch_size = 5
-                pre_poll_wait = 300   # V6: 5 minutes after upload before polling
+                batch_size = 5  # Max 5 per batch to stay within rate limits
+                pre_poll_wait = 300   # 5 minutes after upload before polling
                 batch_wait = 600      # 10 minutes between batches
                 
                 # Process up to batch_size NZBs
@@ -701,7 +729,7 @@ def main():
                         try: nzb.unlink()
                         except: pass
                         uploaded_count += 1
-                    time.sleep(10)  # Brief pause between uploads
+                    time.sleep(UPLOAD_DELAY)  # V7: Configurable delay to respect rate limits
                 
                 remaining = len(nzbs) - uploaded_count
                 if remaining > 0:
