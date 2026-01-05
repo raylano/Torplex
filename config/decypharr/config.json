@@ -35,8 +35,9 @@
     },
     "symlink": {
         "enabled": true,
-        "source": "/mnt/torplex/zurg/__all__",
-        "destination": "/data/media"
+        "source": "/mnt/torplex",
+        "destination": "/data/media",
+        "use_arr_path": true
     },
     "repair": {
         "enabled": true,
