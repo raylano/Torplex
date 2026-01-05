@@ -157,7 +157,7 @@ services:
       - ./config/sonarr:/config
       - ./data/media:/data/media
       - ./data/nzb_watch:/data/nzb_watch
-      - /mnt/torplex:/mnt/torplex:ro
+      - /mnt/torplex:/mnt/torplex:rslave
     ports:
       - "8989:8989"
     depends_on:
@@ -181,7 +181,7 @@ services:
       - ./config/radarr:/config
       - ./data/media:/data/media
       - ./data/nzb_watch:/data/nzb_watch
-      - /mnt/torplex:/mnt/torplex:ro
+      - /mnt/torplex:/mnt/torplex:rslave
     ports:
       - "7878:7878"
     depends_on:
@@ -287,7 +287,7 @@ services:
       - ./config/sonarr-anime:/config
       - ./data/media:/data/media
       - ./data/nzb_watch:/data/nzb_watch
-      - /mnt/torplex:/mnt/torplex:ro
+      - /mnt/torplex:/mnt/torplex:rslave
     ports:
       - "8990:8989"
     depends_on:
@@ -312,7 +312,7 @@ services:
       - ./config/radarr-anime:/config
       - ./data/media:/data/media
       - ./data/nzb_watch:/data/nzb_watch
-      - /mnt/torplex:/mnt/torplex:ro
+      - /mnt/torplex:/mnt/torplex:rslave
     ports:
       - "7879:7878"
     depends_on:
