@@ -16,7 +16,7 @@
         }
     ],
     "qbittorrent": {
-        "download_folder": "/data/media"
+        "download_folder": "/data/downloads"
     },
     "arrs": [
         {
@@ -36,8 +36,8 @@
     "symlink": {
         "enabled": true,
         "source": "/mnt/torplex",
-        "destination": "/data/media",
-        "use_arr_path": true
+        "destination": "/data/downloads",
+        "use_arr_path": false
     },
     "repair": {
         "enabled": true,

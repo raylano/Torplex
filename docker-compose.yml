@@ -156,6 +156,7 @@ services:
     volumes:
       - ./config/sonarr:/config
       - ./data/media:/data/media
+      - ./data/downloads:/data/downloads
       - ./data/nzb_watch:/data/nzb_watch
       - /mnt/torplex:/mnt/torplex:rslave
     ports:
@@ -180,6 +181,7 @@ services:
     volumes:
       - ./config/radarr:/config
       - ./data/media:/data/media
+      - ./data/downloads:/data/downloads
       - ./data/nzb_watch:/data/nzb_watch
       - /mnt/torplex:/mnt/torplex:rslave
     ports:
@@ -206,6 +208,7 @@ services:
     volumes:
       - ./config/decypharr:/app
       - ./data/media:/data/media
+      - ./data/downloads:/data/downloads
       - /mnt/torplex:/mnt/torplex:rslave
     ports:
       - "8282:8282"
@@ -286,6 +289,7 @@ services:
     volumes:
       - ./config/sonarr-anime:/config
       - ./data/media:/data/media
+      - ./data/downloads:/data/downloads
       - ./data/nzb_watch:/data/nzb_watch
       - /mnt/torplex:/mnt/torplex:rslave
     ports:
