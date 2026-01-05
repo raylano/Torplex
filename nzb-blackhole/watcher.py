@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TorBox Usenet Automator V6 - Smart Matching & Batch Notifications
+TorBox Usenet Automator V7 - Queue-Based Release Matching
 - Scans TorBox history for COMPLETED items
 - Smart file matching (handles release name variations)
 - Uses Sonarr/Radarr API for correct folder paths
@@ -60,19 +60,42 @@ processed_ids = set()
 # Track failed upload attempts per NZB (to move to failed after X retries)
 upload_retry_count = {}
 
-# TV Show patterns
+# TV Show patterns (fallback only)
 TV_PATTERNS = [
     r'[Ss]\d{1,2}[Ee]\d{1,2}',  # S01E01
     r'[Ss]eason[\s\.]?\d{1,2}',  # Season 1
     r'\d{1,2}x\d{2}',            # 1x01
+    r'[Ss]\d{1,2}[.\s]',         # S01. or S01 (season packs)
 ]
 
 def is_tv_show(name: str) -> bool:
-    """Detect if content is a TV show based on name patterns."""
+    """Detect if content is a TV show based on Sonarr/Radarr queues first, then patterns.
+    
+    V7: Priority order:
+    1. If name matches Sonarr queue → definitely a TV show
+    2. If name matches Radarr queue → definitely a movie (return False)
+    3. Fallback to pattern matching
+    """
+    normalized = normalize_release_name(name)
+    
+    # Check Sonarr queue first (TV shows)
+    sonarr_queue = get_sonarr_queue_releases()
+    for queued_normalized in sonarr_queue.keys():
+        if queued_normalized in normalized or normalized in queued_normalized:
+            return True  # Found in Sonarr = TV show
+    
+    # Check Radarr queue (movies)
+    radarr_queue = get_radarr_queue_releases()
+    for queued_normalized in radarr_queue.keys():
+        if queued_normalized in normalized or normalized in queued_normalized:
+            return False  # Found in Radarr = movie
+    
+    # Fallback to pattern matching
     for pattern in TV_PATTERNS:
         if re.search(pattern, name, re.IGNORECASE):
             return True
     return False
+
 
 def extract_show_info(name: str) -> tuple:
     """Extract show name and season/episode info from filename."""
@@ -225,17 +248,50 @@ def find_file_in_mount(filename_part: str) -> Path:
     except Exception: pass
     return None
 
-def find_file_smart(name: str) -> Path:
-    """Smart file matching - matches on show name + S##E## only.
+def find_file_smart(name: str, is_show: bool = True) -> Path:
+    """Smart file matching - V7: Uses Sonarr/Radarr queue for exact release matching.
     
-    Handles cases like:
-    TorBox name: Dokter.Tinus.S02E02.DUTCH.1080p.WEB.h264-APESTAARTJE-FTP
-    Actual file: dokter.tinus.s02e02.dutch.1080p.web.h264-apestaartje.mkv
+    Priority:
+    1. Match on exact release name from Sonarr/Radarr queue (most accurate)
+    2. Fallback to show name + S##E## pattern matching
+    3. Fallback to movie title + year matching
     """
     try:
-        if not MOUNT_FOLDER.exists(): return None
+        if not MOUNT_FOLDER.exists(): 
+            return None
         
-        # Extract show name and S##E## pattern
+        normalized_name = normalize_release_name(name)
+        
+        # V7: Try to match against Sonarr/Radarr queue releases first
+        if is_show:
+            queue_releases = get_sonarr_queue_releases()
+        else:
+            queue_releases = get_radarr_queue_releases()
+        
+        # Check if this name matches a queued release
+        matched_release = None
+        for queued_normalized, queued_title in queue_releases.items():
+            # Check if the TorBox name contains the queued release (or vice versa)
+            if queued_normalized in normalized_name or normalized_name in queued_normalized:
+                matched_release = queued_title
+                logger.debug(f"Queue match found: {queued_title}")
+                break
+        
+        if matched_release:
+            # Search for file matching the exact release name
+            release_normalized = normalize_release_name(matched_release)
+            
+            for f in MOUNT_FOLDER.rglob("*"):
+                if f.is_file() and f.suffix.lower() in ['.mkv', '.mp4', '.avi', '.ts']:
+                    fname_normalized = normalize_release_name(f.stem)  # stem = filename without extension
+                    
+                    # Check if file matches the release (high confidence match)
+                    if release_normalized in fname_normalized or fname_normalized in release_normalized:
+                        if "sample" not in f.name.lower() and f.stat().st_size > 50 * 1024 * 1024:
+                            logger.info(f"V7 QUEUE MATCH: {f.name} matches release {matched_release}")
+                            return f
+        
+        # Fallback: Extract show name and S##E## pattern (original logic)
         match = re.search(r'^(.+?)[.\s]([Ss]\d{1,2}[Ee]\d{1,3})', name)
         if match:
             show_part = match.group(1).lower().replace('.', '').replace(' ', '').replace('-', '')
@@ -266,6 +322,7 @@ def find_file_smart(name: str) -> Path:
         logger.debug(f"Smart file search error: {e}")
     return None
 
+
 def find_folder_in_mount(name: str) -> Path:
     """Find the folder containing the download in the mount."""
     try:
@@ -288,8 +345,80 @@ def find_folder_in_mount(name: str) -> Path:
 # Sonarr/Radarr folder lookup cache
 _sonarr_series_cache = None
 _radarr_movie_cache = None
+_sonarr_queue_cache = None
+_radarr_queue_cache = None
 _cache_time = 0
+_queue_cache_time = 0
 CACHE_DURATION = 300  # 5 minutes
+QUEUE_CACHE_DURATION = 60  # 1 minute for queue (more dynamic)
+
+def normalize_release_name(name: str) -> str:
+    """Normalize release name for comparison (lowercase, no dots/spaces/dashes)."""
+    return name.lower().replace('.', '').replace(' ', '').replace('-', '').replace('_', '')
+
+def get_sonarr_queue_releases() -> dict:
+    """Query Sonarr queue to get expected release names.
+    Returns dict mapping normalized release name to full title.
+    """
+    global _sonarr_queue_cache, _queue_cache_time
+    
+    if not SONARR_URL or not SONARR_API_KEY:
+        return {}
+    
+    try:
+        # Refresh cache if expired
+        if _sonarr_queue_cache is None or (time.time() - _queue_cache_time) > QUEUE_CACHE_DURATION:
+            headers = {"X-Api-Key": SONARR_API_KEY}
+            resp = requests.get(f"{SONARR_URL}/api/v3/queue", headers=headers, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                records = data.get('records', []) if isinstance(data, dict) else data
+                _sonarr_queue_cache = {}
+                for item in records:
+                    title = item.get('title', '')
+                    if title:
+                        normalized = normalize_release_name(title)
+                        _sonarr_queue_cache[normalized] = title
+                _queue_cache_time = time.time()
+                logger.debug(f"Refreshed Sonarr queue cache: {len(_sonarr_queue_cache)} items")
+        
+        return _sonarr_queue_cache or {}
+    except Exception as e:
+        logger.debug(f"Sonarr queue lookup failed: {e}")
+    return {}
+
+def get_radarr_queue_releases() -> dict:
+    """Query Radarr queue to get expected release names.
+    Returns dict mapping normalized release name to full title.
+    """
+    global _radarr_queue_cache, _queue_cache_time
+    
+    if not RADARR_URL or not RADARR_API_KEY:
+        return {}
+    
+    try:
+        # Refresh cache if expired  
+        if _radarr_queue_cache is None or (time.time() - _queue_cache_time) > QUEUE_CACHE_DURATION:
+            headers = {"X-Api-Key": RADARR_API_KEY}
+            resp = requests.get(f"{RADARR_URL}/api/v3/queue", headers=headers, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                records = data.get('records', []) if isinstance(data, dict) else data
+                _radarr_queue_cache = {}
+                for item in records:
+                    title = item.get('title', '')
+                    if title:
+                        normalized = normalize_release_name(title)
+                        _radarr_queue_cache[normalized] = title
+                _queue_cache_time = time.time()
+                logger.debug(f"Refreshed Radarr queue cache: {len(_radarr_queue_cache)} items")
+        
+        return _radarr_queue_cache or {}
+    except Exception as e:
+        logger.debug(f"Radarr queue lookup failed: {e}")
+    return {}
+
+
 
 def get_sonarr_series_path(series_name: str) -> str:
     """Query Sonarr to get the correct series folder path."""
@@ -447,7 +576,7 @@ def process_history():
                 found_folder = find_folder_in_mount(name)
                 found_path = None
                 if not found_folder:
-                    found_path = find_file_smart(name)  # V6: Smart matching
+                    found_path = find_file_smart(name, is_show=is_show)  # V7: Queue-based matching
                     if not found_path:
                         found_path = find_file_in_mount(name)  # Fallback
                 
@@ -540,7 +669,7 @@ class NZBHandler(FileSystemEventHandler):
                 except: pass
 
 def main():
-    logger.info("Starting TorBox Usenet Automator V6 (Smart Matching & Batch Notify)...")
+    logger.info("Starting TorBox Usenet Automator V7 (Queue-Based Release Matching)...")
     logger.info(f"Mount folder: {MOUNT_FOLDER}")
     logger.info(f"Media movies: {MEDIA_MOVIES}")
     logger.info(f"Media shows: {MEDIA_SHOWS}")
