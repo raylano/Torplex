@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TorBox Usenet Automator V7 - Queue-Based Release Matching
+TorBox Usenet Automator V8 - Sonarr/Radarr Import Triggers
 - Scans TorBox history for COMPLETED items
 - Smart file matching (handles release name variations)
 - Uses Sonarr/Radarr API for correct folder paths
@@ -514,12 +514,69 @@ def create_symlink(source: Path, dest: Path) -> bool:
         logger.error(f"Symlink creation failed: {e}")
         return False
 
+def trigger_sonarr_import(file_path: str):
+    """Trigger Sonarr to scan and import a specific file/folder.
+    
+    V8: Uses DownloadedEpisodesScan command with path parameter so Sonarr
+    properly imports and registers the file in its database.
+    """
+    if not SONARR_URL or not SONARR_API_KEY:
+        return False
+    try:
+        headers = {"X-Api-Key": SONARR_API_KEY, "Content-Type": "application/json"}
+        # Use DownloadedEpisodesScan with specific path
+        resp = requests.post(
+            f"{SONARR_URL}/api/v3/command",
+            headers=headers,
+            json={
+                "name": "DownloadedEpisodesScan",
+                "path": file_path
+            },
+            timeout=30
+        )
+        if resp.status_code == 201:
+            logger.info(f"Sonarr import triggered for: {file_path}")
+            return True
+        else:
+            logger.warning(f"Sonarr import trigger failed: {resp.status_code}")
+            return False
+    except Exception as e:
+        logger.error(f"Failed to trigger Sonarr import: {e}")
+        return False
+
+def trigger_radarr_import(file_path: str):
+    """Trigger Radarr to scan and import a specific file/folder.
+    
+    V8: Uses DownloadedMoviesScan command with path parameter.
+    """
+    if not RADARR_URL or not RADARR_API_KEY:
+        return False
+    try:
+        headers = {"X-Api-Key": RADARR_API_KEY, "Content-Type": "application/json"}
+        resp = requests.post(
+            f"{RADARR_URL}/api/v3/command",
+            headers=headers,
+            json={
+                "name": "DownloadedMoviesScan",
+                "path": file_path
+            },
+            timeout=30
+        )
+        if resp.status_code == 201:
+            logger.info(f"Radarr import triggered for: {file_path}")
+            return True
+        else:
+            logger.warning(f"Radarr import trigger failed: {resp.status_code}")
+            return False
+    except Exception as e:
+        logger.error(f"Failed to trigger Radarr import: {e}")
+        return False
+
 def notify_sonarr(series_name: str):
-    """Notify Sonarr to rescan for new content."""
+    """Notify Sonarr to rescan for new content (fallback/batch rescan)."""
     if not SONARR_URL or not SONARR_API_KEY:
         return
     try:
-        # Trigger a rescan
         headers = {"X-Api-Key": SONARR_API_KEY, "Content-Type": "application/json"}
         resp = requests.post(
             f"{SONARR_URL}/api/v3/command",
@@ -535,11 +592,10 @@ def notify_sonarr(series_name: str):
         logger.error(f"Failed to notify Sonarr: {e}")
 
 def notify_radarr(movie_name: str):
-    """Notify Radarr to rescan for new content."""
+    """Notify Radarr to rescan for new content (fallback/batch rescan)."""
     if not RADARR_URL or not RADARR_API_KEY:
         return
     try:
-        # Trigger a rescan
         headers = {"X-Api-Key": RADARR_API_KEY, "Content-Type": "application/json"}
         resp = requests.post(
             f"{RADARR_URL}/api/v3/command",
@@ -628,11 +684,15 @@ def process_history():
                                     if create_symlink(f, dest_file):
                                         logger.info(f"SHOW SYMLINK: {dest_file}")
                                         symlinks_created += 1
+                                        # V8: Trigger Sonarr import for this file
+                                        trigger_sonarr_import(str(dest_file))
                         else:
                             dest_file = dest_folder / found_path.name
                             if create_symlink(found_path, dest_file):
                                 logger.info(f"SHOW SYMLINK: {dest_file}")
                                 symlinks_created += 1
+                                # V8: Trigger Sonarr import for this file
+                                trigger_sonarr_import(str(dest_file))
                         
                         notify_sonarr_flag = True  # V6: Batch notification
                     else:
@@ -654,12 +714,16 @@ def process_history():
                                         if create_symlink(f, dest_file):
                                             logger.info(f"MOVIE SYMLINK: {dest_file}")
                                             symlinks_created += 1
+                                            # V8: Trigger Radarr import for this file
+                                            trigger_radarr_import(str(dest_file))
                                         break  # Only first main file
                         else:
                             dest_file = dest_folder / found_path.name
                             if create_symlink(found_path, dest_file):
                                 logger.info(f"MOVIE SYMLINK: {dest_file}")
                                 symlinks_created += 1
+                                # V8: Trigger Radarr import for this file
+                                trigger_radarr_import(str(dest_file))
                         
                         notify_radarr_flag = True  # V6: Batch notification
                     
@@ -697,7 +761,7 @@ class NZBHandler(FileSystemEventHandler):
                 except: pass
 
 def main():
-    logger.info("Starting TorBox Usenet Automator V7 (Queue-Based Release Matching)...")
+    logger.info("Starting TorBox Usenet Automator V8 (Sonarr/Radarr Import Triggers)...")
     logger.info(f"Mount folder: {MOUNT_FOLDER}")
     logger.info(f"Media movies: {MEDIA_MOVIES}")
     logger.info(f"Media shows: {MEDIA_SHOWS}")
